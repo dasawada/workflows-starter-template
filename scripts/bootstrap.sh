@@ -75,7 +75,24 @@ echo "== 套用 D1 schema（remote）"
 npx wrangler d1 migrations apply DB --remote
 
 echo "== 部署"
-npx wrangler deploy
+DEPLOY_LOG=$(mktemp)
+if ! npx wrangler deploy 2>&1 | tee "$DEPLOY_LOG"; then
+  if grep -q "Analytics Engine" "$DEPLOY_LOG"; then
+    echo "!! 帳號尚未啟用 Analytics Engine，改以不帶 METRICS binding 的設定重試一次（程式端會略過指標寫入）"
+    echo "   之後到 dashboard → Workers & Pages → Analytics Engine 按啟用，再重新部署即可恢復指標"
+    node -e '
+      const fs=require("fs");
+      for(const d of fs.existsSync("dist")?fs.readdirSync("dist"):[]){
+        const p=`dist/${d}/wrangler.json`; if(!fs.existsSync(p)) continue;
+        const cfg=JSON.parse(fs.readFileSync(p,"utf8"));
+        delete cfg.analytics_engine_datasets;
+        fs.writeFileSync(p,JSON.stringify(cfg));
+      }'
+    npx wrangler deploy
+  else
+    exit 1
+  fi
+fi
 
 cat <<MSG
 

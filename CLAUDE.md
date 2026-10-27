@@ -68,6 +68,7 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 - LINE 按鈕可反覆按：`recordPromptResponse` 每次都寫 `prompt_responses`，但只有第一次（或 `allow_change = 1`）會更新 `prompts` 的結果；重複按會回覆「以第一次回覆為準」。
 
 - `wrangler.jsonc` 的 `migrations`（Durable Object）只能追加新 tag，絕不能改寫或刪除已部署過的 tag，否則 Cloudflare 會略過它並在部署時報 10064。正式環境目前已套用到 `v2`。
+- Analytics Engine 需在 dashboard 啟用一次；未啟用時 bootstrap 會改以不帶 `METRICS` binding 的設定重試部署，`metrics.ts` 以 `env.METRICS?.` 容忍缺少 binding。
 - Queues 只在 Workers Paid 提供。`scripts/bootstrap.sh` 建不出 queue 時會改寫 dist 內的部署設定（移除 `queues`、`WEBHOOK_MODE=inline`），程式端以 `env.LINE_EVENTS` 是否存在再保險一次。`wrangler.jsonc` 本身保持 queue 設定。
 - 正式環境的 Worker `workflows-starter-template` 曾部署過原始範本，舊的 Workflow `my-workflow` 可能殘留在 dashboard，不影響運作，可手動刪除。
 - `test/reminder.test.ts` 會印一行 `WorkflowTimeoutError` 的 uncaught exception，來自測試工具 `forceEventTimeout` 內部，測試本身通過，可忽略。
