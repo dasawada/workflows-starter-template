@@ -10,7 +10,7 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 
 - 部署走 GitHub → Cloudflare Workers Builds：push 到 `main` 即自動建置（`npm run build`）並執行 `npm run deploy`（內含 `scripts/bootstrap.sh`）（建 D1/R2、寫入 database_id、套 schema、`wrangler deploy`）。
 - Claude 的職責是改好程式、通過 `npm run check` 與 `npm test`、commit 並 push 到 `main`；部署與密鑰設定在 Cloudflare dashboard 完成，Claude 不需要也不應登入 Cloudflare。
-- `wrangler.jsonc` 的 `database_id` 由 bootstrap 在建置時寫入，本機留 `REPLACE_WITH_YOUR_D1_DATABASE_ID` 即可。
+- `wrangler.jsonc` 的 `database_id` 是 D1 資源識別碼（非密鑰），已寫入正式值；若換帳號或重建資料庫，bootstrap 會自動覆寫（含 dist 內已產生的 wrangler.json）。
 - **一切功能都在正式環境部署後直接驗證**，不以本機開發伺服器為驗證依據。
 - 改完程式碼的標準流程：`npm run check`（tsc + dry-run）→ `npm test` → `npm run deploy` → 用真實 LINE 帳號與客服台操作確認。
 - 需要查正式環境狀況時用 `npx wrangler tail`、`npx wrangler d1 execute DB --remote --command "..."`。

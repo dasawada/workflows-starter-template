@@ -26,11 +26,14 @@ else
   echo "   已存在 $DB_ID"
 fi
 
-echo "== 寫入 database_id 到 wrangler.jsonc"
+echo "== 寫入 database_id 到 wrangler.jsonc 與 dist 內已產生的設定"
 node -e '
-  const fs=require("fs");const p="wrangler.jsonc";
-  const s=fs.readFileSync(p,"utf8").replace(/"database_id":\s*"[^"]*"/,`"database_id": "${process.argv[1]}"`);
-  fs.writeFileSync(p,s);' "$DB_ID"
+  const fs=require("fs");
+  const files=["wrangler.jsonc",...fs.existsSync("dist")?fs.readdirSync("dist").map(d=>`dist/${d}/wrangler.json`).filter(f=>fs.existsSync(f)):[]];
+  for(const p of files){
+    const s=fs.readFileSync(p,"utf8").replace(/"database_id":\s*"[^"]*"/,`"database_id": "${process.argv[1]}"`);
+    fs.writeFileSync(p,s);
+  }' "$DB_ID"
 
 echo "== R2: $BUCKET_NAME"
 if npx wrangler r2 bucket list 2>/dev/null | grep -Eq "^name: *$BUCKET_NAME\$|^$BUCKET_NAME\$"; then

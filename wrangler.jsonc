@@ -30,13 +30,13 @@
 	},
 	/**
 	 * D1：對話與訊息的永久儲存
-	 * 正式環境請先執行 `wrangler d1 create cs-console-db`，再把 database_id 貼到下方
+	 * database_id 是資源識別碼（非密鑰），由 scripts/bootstrap.sh 建立資料庫後寫入
 	 */
 	"d1_databases": [
 		{
 			"binding": "DB",
 			"database_name": "cs-console-db",
-			"database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+			"database_id": "30b6a2d1-57c6-40d6-ba7d-2b4ec8eac62b",
 			"migrations_dir": "migrations"
 		}
 	],
