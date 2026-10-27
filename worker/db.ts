@@ -5,6 +5,9 @@ import type {
 	MessageType,
 	MessageSender,
 	MessageDirection,
+	Prompt,
+	PromptOption,
+	PromptStatus,
 } from "../shared/types";
 
 /**
@@ -196,7 +199,7 @@ export interface NewMessageInput {
 
 /** 對話清單上顯示的預覽文字 */
 export function previewText(type: MessageType, text: string | null): string {
-	if (type === "text" && text) return text;
+	if ((type === "text" || type === "prompt") && text) return text;
 	const labels: Record<MessageType, string> = {
 		text: "",
 		image: "[圖片]",
@@ -205,6 +208,7 @@ export function previewText(type: MessageType, text: string | null): string {
 		file: "[檔案]",
 		sticker: "[貼圖]",
 		location: "[位置]",
+		prompt: "[選擇題]",
 		unknown: "[不支援的訊息]",
 	};
 	return labels[type] || "";
@@ -379,4 +383,177 @@ export async function markNeedsAttentionIfUnanswered(
 		.run();
 	if (!result.meta.changes) return null;
 	return getConversation(db, conversationId);
+}
+
+export async function updateMessageMetadata(
+	db: D1Database,
+	messageId: string,
+	metadata: Record<string, unknown>,
+): Promise<Message | null> {
+	await db
+		.prepare("UPDATE messages SET metadata = ? WHERE id = ?")
+		.bind(JSON.stringify(metadata), messageId)
+		.run();
+	const row = await db
+		.prepare("SELECT * FROM messages WHERE id = ?")
+		.bind(messageId)
+		.first<MessageRow>();
+	return row ? toMessage(row) : null;
+}
+
+// ---------- 可追蹤訊息（prompts） ----------
+
+interface PromptRow {
+	id: string;
+	conversation_id: string;
+	message_id: string | null;
+	template_key: string | null;
+	body: string | null;
+	question: string;
+	options: string;
+	variables: string | null;
+	status: string;
+	choice: string | null;
+	choice_label: string | null;
+	responded_at: number | null;
+	created_at: number;
+	display_name?: string | null;
+}
+
+function parseJson<T>(value: string | null, fallback: T): T {
+	if (!value) return fallback;
+	try {
+		return JSON.parse(value) as T;
+	} catch {
+		return fallback;
+	}
+}
+
+function toPrompt(row: PromptRow): Prompt {
+	return {
+		id: row.id,
+		conversationId: row.conversation_id,
+		messageId: row.message_id,
+		templateKey: row.template_key,
+		body: row.body,
+		question: row.question,
+		options: parseJson<PromptOption[]>(row.options, []),
+		variables: parseJson<Record<string, string> | null>(row.variables, null),
+		status: row.status as PromptStatus,
+		choice: row.choice,
+		choiceLabel: row.choice_label,
+		respondedAt: row.responded_at,
+		createdAt: row.created_at,
+		displayName: row.display_name ?? undefined,
+	};
+}
+
+export async function createPrompt(
+	db: D1Database,
+	input: {
+		id: string;
+		conversationId: string;
+		messageId: string | null;
+		templateKey?: string | null;
+		body?: string | null;
+		question: string;
+		options: PromptOption[];
+		variables?: Record<string, string> | null;
+		createdAt: number;
+	},
+): Promise<Prompt> {
+	await db
+		.prepare(
+			`INSERT INTO prompts
+			 (id, conversation_id, message_id, template_key, body, question, options, variables, status, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+		)
+		.bind(
+			input.id,
+			input.conversationId,
+			input.messageId,
+			input.templateKey ?? null,
+			input.body ?? null,
+			input.question,
+			JSON.stringify(input.options),
+			input.variables ? JSON.stringify(input.variables) : null,
+			input.createdAt,
+		)
+		.run();
+	const prompt = await getPrompt(db, input.id);
+	if (!prompt) throw new Error("prompt missing after insert");
+	return prompt;
+}
+
+export async function getPrompt(
+	db: D1Database,
+	id: string,
+): Promise<Prompt | null> {
+	const row = await db
+		.prepare(
+			`SELECT p.*, c.display_name FROM prompts p
+			 LEFT JOIN conversations c ON c.id = p.conversation_id
+			 WHERE p.id = ?`,
+		)
+		.bind(id)
+		.first<PromptRow>();
+	return row ? toPrompt(row) : null;
+}
+
+/**
+ * 記錄一次點擊，並把 prompt 的最新選擇更新上去。
+ * 回傳 alreadyAnswered 讓呼叫端決定回覆文案。
+ */
+export async function recordPromptResponse(
+	db: D1Database,
+	promptId: string,
+	choice: string,
+	choiceLabel: string | null,
+	now: number,
+): Promise<{ prompt: Prompt; alreadyAnswered: boolean } | null> {
+	const before = await getPrompt(db, promptId);
+	if (!before) return null;
+
+	await db.batch([
+		db
+			.prepare(
+				"INSERT INTO prompt_responses (id, prompt_id, choice, choice_label, created_at) VALUES (?, ?, ?, ?, ?)",
+			)
+			.bind(crypto.randomUUID(), promptId, choice, choiceLabel, now),
+		db
+			.prepare(
+				"UPDATE prompts SET status = 'answered', choice = ?, choice_label = ?, responded_at = ? WHERE id = ?",
+			)
+			.bind(choice, choiceLabel, now, promptId),
+	]);
+
+	const prompt = await getPrompt(db, promptId);
+	if (!prompt) return null;
+	return { prompt, alreadyAnswered: before.status === "answered" };
+}
+
+export async function listPrompts(
+	db: D1Database,
+	options: { status?: PromptStatus | "all"; conversationId?: string; limit?: number } = {},
+): Promise<Prompt[]> {
+	const limit = Math.min(options.limit ?? 100, 500);
+	const where: string[] = [];
+	const binds: unknown[] = [];
+	if (options.status && options.status !== "all") {
+		where.push("p.status = ?");
+		binds.push(options.status);
+	}
+	if (options.conversationId) {
+		where.push("p.conversation_id = ?");
+		binds.push(options.conversationId);
+	}
+	const sql = `SELECT p.*, c.display_name FROM prompts p
+		LEFT JOIN conversations c ON c.id = p.conversation_id
+		${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+		ORDER BY p.created_at DESC LIMIT ?`;
+	const { results } = await db
+		.prepare(sql)
+		.bind(...binds, limit)
+		.all<PromptRow>();
+	return results.map(toPrompt);
 }

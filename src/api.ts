@@ -4,6 +4,10 @@ import type {
 	ConversationStatus,
 	Message,
 	MessageListResponse,
+	Prompt,
+	PromptListResponse,
+	PromptStatus,
+	SendPromptInput,
 } from "../shared/types";
 
 const TOKEN_KEY = "cs-console-token";
@@ -72,6 +76,15 @@ export const api = {
 			`/api/conversations/${encodeURIComponent(conversationId)}/reply`,
 			{ method: "POST", body: JSON.stringify({ text }) },
 		),
+
+	sendPrompt: (conversationId: string, input: SendPromptInput) =>
+		request<{ prompt: Prompt; message: Message; conversation: Conversation }>(
+			`/api/conversations/${encodeURIComponent(conversationId)}/prompt`,
+			{ method: "POST", body: JSON.stringify(input) },
+		),
+
+	listPrompts: (status: PromptStatus | "all" = "all") =>
+		request<PromptListResponse>(`/api/prompts?status=${encodeURIComponent(status)}`),
 
 	markRead: (conversationId: string) =>
 		request<{ conversation: Conversation }>(

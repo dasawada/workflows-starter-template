@@ -99,13 +99,14 @@ export type LineMessageContent =
 	| { id: string; type: string };
 
 export interface LineWebhookEvent {
-	type: "message" | "follow" | "unfollow" | "join" | "leave" | string;
+	type: "message" | "follow" | "unfollow" | "join" | "leave" | "postback" | string;
 	timestamp: number;
 	source: LineSource;
 	replyToken?: string;
 	webhookEventId?: string;
 	deliveryContext?: { isRedelivery: boolean };
 	message?: LineMessageContent;
+	postback?: { data: string; params?: Record<string, string> };
 }
 
 export interface LineWebhookBody {
@@ -142,6 +143,58 @@ export function conversationTarget(
 		};
 	}
 	return null;
+}
+
+/** LINE Confirm template 的文字上限 */
+export const CONFIRM_TEXT_MAX = 240;
+export const TEXT_MESSAGE_MAX = 5000;
+
+/**
+ * 組出「正文 + 是/否按鈕」的訊息陣列。
+ * 按鈕用 postback，data 帶 prompt id 與選項值；displayText 讓使用者的選擇顯示在聊天室裡。
+ */
+export function buildPromptMessages(input: {
+	promptId: string;
+	body?: string | null;
+	question: string;
+	options: { label: string; value: string }[];
+}): unknown[] {
+	const messages: unknown[] = [];
+	const body = input.body?.trim();
+	if (body) messages.push({ type: "text", text: body });
+
+	const actions = input.options.slice(0, 2).map((o) => ({
+		type: "postback",
+		label: o.label.slice(0, 20),
+		data: new URLSearchParams({ prompt: input.promptId, choice: o.value }).toString(),
+		displayText: o.label,
+	}));
+
+	messages.push({
+		type: "template",
+		altText: input.question.slice(0, 400),
+		template: {
+			type: "confirm",
+			text: input.question.slice(0, CONFIRM_TEXT_MAX),
+			actions,
+		},
+	});
+	return messages;
+}
+
+/** 解析 postback data；不是我們送出的格式就回 null */
+export function parsePromptPostback(
+	data: string,
+): { promptId: string; choice: string } | null {
+	try {
+		const params = new URLSearchParams(data);
+		const promptId = params.get("prompt");
+		const choice = params.get("choice");
+		if (!promptId || choice === null) return null;
+		return { promptId, choice };
+	} catch {
+		return null;
+	}
 }
 
 export function toMessageType(type: string): MessageType {

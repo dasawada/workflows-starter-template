@@ -1,6 +1,7 @@
 import {
 	LineClient,
 	conversationTarget,
+	parsePromptPostback,
 	stickerImageUrl,
 	toMessageType,
 	verifyLineSignature,
@@ -9,10 +10,13 @@ import {
 } from "./line";
 import {
 	getConversation,
+	getPrompt,
 	getReminderInstanceId,
 	insertMessage,
+	recordPromptResponse,
 	setReminderInstanceId,
 	updateMessageMedia,
+	updateMessageMetadata,
 	upsertConversation,
 } from "./db";
 import { inboxStub } from "./inbox-do";
@@ -77,6 +81,11 @@ async function handleEvent(
 		case "message":
 			if (event.message) {
 				await handleMessage(event, target, env, ctx, client);
+			}
+			return;
+		case "postback":
+			if (event.postback) {
+				await handlePostback(event, target, env, client);
 			}
 			return;
 		case "follow":
@@ -245,6 +254,99 @@ async function handleMessage(
 	}
 
 	await startReminderIfNeeded(target.conversationId, env);
+}
+
+/**
+ * 使用者按下可追蹤訊息的按鈕：
+ * 1. 寫入 prompt_responses 並更新 prompts 的最新選擇
+ * 2. 在對話裡留一則使用者訊息「已選擇：是」，客服台看得到
+ * 3. 更新原本那則選擇題訊息的狀態，並廣播給客服台
+ * 4. 用 reply token 回一句確認
+ */
+async function handlePostback(
+	event: LineWebhookEvent,
+	target: Target,
+	env: Env,
+	client: LineClient,
+): Promise<void> {
+	const parsed = parsePromptPostback(event.postback!.data);
+	if (!parsed) return;
+	const now = event.timestamp || Date.now();
+
+	const existing = await getPrompt(env.DB, parsed.promptId);
+	if (!existing || existing.conversationId !== target.conversationId) return;
+	const label =
+		existing.options.find((o) => o.value === parsed.choice)?.label ?? parsed.choice;
+
+	const result = await recordPromptResponse(
+		env.DB,
+		parsed.promptId,
+		parsed.choice,
+		label,
+		now,
+	);
+	if (!result) return;
+	const { prompt } = result;
+
+	const inserted = await insertMessage(env.DB, {
+		id: crypto.randomUUID(),
+		conversationId: target.conversationId,
+		direction: "inbound",
+		sender: "user",
+		type: "text",
+		text: `已選擇：${label}`,
+		metadata: { promptId: prompt.id, choice: parsed.choice },
+		externalId: event.webhookEventId ? `postback:${event.webhookEventId}` : null,
+		createdAt: now,
+	});
+	if (!inserted) return; // 重送
+
+	const inbox = inboxStub(env);
+	await inbox.broadcast({
+		type: "message.new",
+		message: inserted.message,
+		conversation: inserted.conversation,
+	});
+
+	if (prompt.messageId) {
+		const updated = await updateMessageMetadata(env.DB, prompt.messageId, {
+			promptId: prompt.id,
+			question: prompt.question,
+			options: prompt.options,
+			status: prompt.status,
+			choice: prompt.choice,
+			choiceLabel: prompt.choiceLabel,
+			respondedAt: prompt.respondedAt,
+		});
+		if (updated) {
+			await inbox.broadcast({
+				type: "message.new",
+				message: updated,
+				conversation: inserted.conversation,
+			});
+		}
+	}
+	await inbox.broadcast({ type: "prompt.updated", prompt });
+
+	if (event.replyToken) {
+		const text = result.alreadyAnswered
+			? `已更新您的選擇為「${label}」。`
+			: `已收到您的選擇「${label}」，謝謝！`;
+		try {
+			await client.reply(event.replyToken, [{ type: "text", text }]);
+			await insertMessage(env.DB, {
+				id: crypto.randomUUID(),
+				conversationId: target.conversationId,
+				direction: "outbound",
+				sender: "system",
+				type: "text",
+				text,
+				createdAt: now + 1,
+			});
+		} catch (err) {
+			console.error("postback reply failed", err);
+		}
+	}
 }
 
 async function storeMedia(

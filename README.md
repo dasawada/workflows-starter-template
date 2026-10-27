@@ -6,6 +6,7 @@
 - **發訊**：客服在網頁上回覆 → LINE Push API → 存入 D1 → 廣播給其他在線客服
 - **媒體**：使用者傳的圖片／影片／語音／檔案背景下載到 R2，客服台直接顯示
 - **逾時提醒**：Cloudflare Workflows 監看每個對話，客服超過 `REPLY_SLA_MINUTES` 未回覆就標記「逾時」並推播
+- **可追蹤訊息**：客服台送出「正文 + 是／否按鈕」（LINE Confirm template），使用者點選後以 postback 回到 webhook，結果寫入 D1 的 `prompts` 與 `prompt_responses`，客服台即時顯示並可匯出 CSV。範本放在 `src/templates.ts`，正文裡的 `{{變數}}` 會自動變成表單欄位
 - **自動歡迎**：使用者加好友時用 reply token 送 `WELCOME_MESSAGE`
 - **群組／多人聊天室**：以群組為對話單位，訊息會標示發言者
 
@@ -93,6 +94,8 @@ npm run dev                      # http://localhost:5173，只看 UI 排版
 | GET | `/api/conversations?status=open\|closed\|all` | 對話清單 |
 | GET | `/api/conversations/:id/messages?before=&limit=` | 訊息（舊→新） |
 | POST | `/api/conversations/:id/reply` | `{ "text": "..." }` |
+| POST | `/api/conversations/:id/prompt` | `{ "body"?, "question", "options": [{label,value}], "templateKey"?, "variables"? }` 送可追蹤的選擇題 |
+| GET | `/api/prompts?status=all\|pending\|answered&conversationId=` | 可追蹤訊息與使用者的選擇 |
 | POST | `/api/conversations/:id/read` | 清除未讀 |
 | POST | `/api/conversations/:id/status` | `{ "status": "open" \| "closed" }` |
 | GET | `/api/media/:key` | R2 媒體 |

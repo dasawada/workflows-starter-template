@@ -4,12 +4,17 @@ import type {
 	ConversationStatus,
 	InboxEvent,
 	Message,
+	Prompt,
+	PromptStatus,
+	SendPromptInput,
 } from "../shared/types";
 import { api, ApiError, getToken, setToken } from "./api";
 import { useInboxSocket } from "./hooks/useInboxSocket";
 import { Login } from "./components/Login";
 import { ConversationList } from "./components/ConversationList";
 import { MessageThread } from "./components/MessageThread";
+import { PromptDialog } from "./components/PromptDialog";
+import { PromptsPanel } from "./components/PromptsPanel";
 
 const PAGE_SIZE = 50;
 
@@ -28,6 +33,12 @@ function App() {
 	const [messages, setMessages] = useState<Message[]>([]);
 	const [messagesLoading, setMessagesLoading] = useState(false);
 	const [hasMore, setHasMore] = useState(false);
+
+	const [promptDialogOpen, setPromptDialogOpen] = useState(false);
+	const [promptsPanelOpen, setPromptsPanelOpen] = useState(false);
+	const [prompts, setPrompts] = useState<Prompt[]>([]);
+	const [promptsLoading, setPromptsLoading] = useState(false);
+	const [promptsFilter, setPromptsFilter] = useState<PromptStatus | "all">("all");
 
 	// ---------- 驗證 ----------
 	useEffect(() => {
@@ -167,9 +178,17 @@ function App() {
 				upsertConversation(event.conversation);
 			} else if (event.type === "conversation.updated") {
 				upsertConversation(event.conversation);
+			} else if (event.type === "prompt.updated") {
+				setPrompts((prev) => {
+					const matches =
+						promptsFilter === "all" || event.prompt.status === promptsFilter;
+					const rest = prev.filter((p) => p.id !== event.prompt.id);
+					if (!matches) return rest;
+					return [event.prompt, ...rest].sort((a, b) => b.createdAt - a.createdAt);
+				});
 			}
 		},
-		[selectedId, upsertConversation],
+		[selectedId, upsertConversation, promptsFilter],
 	);
 
 	const { connected } = useInboxSocket(auth === "authed", onEvent);
@@ -191,6 +210,26 @@ function App() {
 		setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
 		upsertConversation(conversation);
 	};
+
+	const handleSendPrompt = async (input: SendPromptInput) => {
+		if (!selectedId) return;
+		const { message, conversation } = await api.sendPrompt(selectedId, input);
+		setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
+		upsertConversation(conversation);
+	};
+
+	const loadPrompts = useCallback(async (status: PromptStatus | "all") => {
+		setPromptsFilter(status);
+		setPromptsLoading(true);
+		try {
+			const { prompts } = await api.listPrompts(status);
+			setPrompts(prompts);
+		} catch {
+			// 顯示空清單即可
+		} finally {
+			setPromptsLoading(false);
+		}
+	}, []);
 
 	const handleToggleStatus = async () => {
 		if (!selected) return;
@@ -223,6 +262,16 @@ function App() {
 						{totalUnread}
 					</span>
 				)}
+				<button
+					onClick={() => setPromptsPanelOpen((v) => !v)}
+					className={`text-xs px-2.5 py-1 rounded-md ${
+						promptsPanelOpen
+							? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
+							: "text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+					}`}
+				>
+					追蹤訊息
+				</button>
 				<span
 					className={`ml-auto flex items-center gap-1.5 text-[11px] ${
 						connected ? "text-emerald-600" : "text-amber-600"
@@ -260,8 +309,20 @@ function App() {
 					/>
 				</aside>
 
-				<main className={`flex-1 min-w-0 ${selectedId ? "block" : "hidden lg:block"}`}>
-					{selected ? (
+				<main className={`flex-1 min-w-0 ${selectedId || promptsPanelOpen ? "block" : "hidden lg:block"}`}>
+					{promptsPanelOpen ? (
+						<PromptsPanel
+							prompts={prompts}
+							loading={promptsLoading}
+							onRefresh={loadPrompts}
+							onOpenConversation={(id) => {
+								setPromptsPanelOpen(false);
+								setFilter("all");
+								setSelectedId(id);
+							}}
+							onClose={() => setPromptsPanelOpen(false)}
+						/>
+					) : selected ? (
 						<MessageThread
 							conversation={selected}
 							messages={messages}
@@ -269,6 +330,7 @@ function App() {
 							hasMore={hasMore}
 							onLoadMore={() => void loadMore()}
 							onSend={handleSend}
+							onOpenPrompt={() => setPromptDialogOpen(true)}
 							onToggleStatus={() => void handleToggleStatus()}
 							onBack={() => setSelectedId(null)}
 						/>
@@ -279,6 +341,10 @@ function App() {
 					)}
 				</main>
 			</div>
+
+			{promptDialogOpen && selected && (
+				<PromptDialog onClose={() => setPromptDialogOpen(false)} onSend={handleSendPrompt} />
+			)}
 		</div>
 	);
 }

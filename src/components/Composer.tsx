@@ -3,9 +3,10 @@ import { useState, type KeyboardEvent } from "react";
 interface Props {
 	disabled: boolean;
 	onSend: (text: string) => Promise<void>;
+	onOpenPrompt: () => void;
 }
 
-export function Composer({ disabled, onSend }: Props) {
+export function Composer({ disabled, onSend, onOpenPrompt }: Props) {
 	const [text, setText] = useState("");
 	const [sending, setSending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -36,6 +37,15 @@ export function Composer({ disabled, onSend }: Props) {
 		<div className="border-t border-neutral-200 dark:border-neutral-800 p-3 bg-white dark:bg-neutral-900">
 			{error && <p className="text-xs text-red-600 dark:text-red-400 mb-2">{error}</p>}
 			<div className="flex gap-2 items-end">
+				<button
+					type="button"
+					onClick={onOpenPrompt}
+					disabled={disabled}
+					title="發送帶「是／否」按鈕的可追蹤訊息"
+					className="shrink-0 rounded-lg border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-50 text-sm px-3 py-2"
+				>
+					選擇題
+				</button>
 				<textarea
 					value={text}
 					onChange={(e) => setText(e.target.value)}

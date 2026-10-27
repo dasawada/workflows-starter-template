@@ -53,6 +53,42 @@ function Content({ message }: { message: Message }) {
 		case "text":
 			return <>{message.text}</>;
 
+		case "prompt": {
+			const options = (meta.options as { label: string; value: string }[] | undefined) ?? [];
+			const answered = meta.status === "answered";
+			const bodyText = message.text?.replace(/\n\n[^\n]*$/, "") ?? "";
+			const question = (meta.question as string | undefined) ?? "";
+			return (
+				<div className="space-y-2">
+					{bodyText && bodyText !== question && <div>{bodyText}</div>}
+					<div className="rounded-xl bg-white/15 ring-1 ring-white/30 overflow-hidden">
+						<div className="px-3 py-2 text-sm">{question}</div>
+						<div className="grid grid-cols-2 border-t border-white/30 text-xs">
+							{options.map((o, i) => {
+								const picked = answered && meta.choice === o.value;
+								return (
+									<div
+										key={o.value}
+										className={`py-1.5 text-center ${i > 0 ? "border-l border-white/30" : ""} ${
+											picked ? "bg-white text-emerald-700 font-semibold" : "opacity-80"
+										}`}
+									>
+										{o.label}
+										{picked ? " ✓" : ""}
+									</div>
+								);
+							})}
+						</div>
+					</div>
+					<div className="text-[11px] opacity-80">
+						{answered
+							? `已回覆：${(meta.choiceLabel as string) ?? (meta.choice as string)}`
+							: "待回覆"}
+					</div>
+				</div>
+			);
+		}
+
 		case "sticker":
 			return meta.imageUrl ? (
 				<img

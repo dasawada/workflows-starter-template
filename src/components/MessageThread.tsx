@@ -12,6 +12,7 @@ interface Props {
 	hasMore: boolean;
 	onLoadMore: () => void;
 	onSend: (text: string) => Promise<void>;
+	onOpenPrompt: () => void;
 	onToggleStatus: () => void;
 	onBack?: () => void;
 }
@@ -23,6 +24,7 @@ export function MessageThread({
 	hasMore,
 	onLoadMore,
 	onSend,
+	onOpenPrompt,
 	onToggleStatus,
 	onBack,
 }: Props) {
@@ -123,7 +125,7 @@ export function MessageThread({
 				{items}
 			</div>
 
-			<Composer disabled={closed} onSend={onSend} />
+			<Composer disabled={closed} onSend={onSend} onOpenPrompt={onOpenPrompt} />
 		</div>
 	);
 }
