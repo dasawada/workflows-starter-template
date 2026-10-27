@@ -407,7 +407,7 @@ export class LineClient {
 			});
 			return await sendResult(res);
 		} catch (err) {
-			return { ok: false, status: 0, requestId: null, error: err instanceof Error ? err.message : String(err), transient: true };
+			return { ok: false, status: 0, requestId: null, error: err instanceof Error ? err.message : String(err), transient: true, sentMessages: [] };
 		}
 	}
 
@@ -424,7 +424,7 @@ export class LineClient {
 			});
 			return await sendResult(res);
 		} catch (err) {
-			return { ok: false, status: 0, requestId: null, error: err instanceof Error ? err.message : String(err), transient: true };
+			return { ok: false, status: 0, requestId: null, error: err instanceof Error ? err.message : String(err), transient: true, sentMessages: [] };
 		}
 	}
 
