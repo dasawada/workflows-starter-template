@@ -1,6 +1,7 @@
 import type {
 	Conversation,
 	ConversationListResponse,
+	ConversationQuery,
 	ConversationStatus,
 	Message,
 	MessageListResponse,
@@ -9,6 +10,7 @@ import type {
 	PromptStatus,
 	SendMessagesInput,
 	SendPromptInput,
+	Stats,
 } from "../shared/types";
 
 const TOKEN_KEY = "cs-console-token";
@@ -60,10 +62,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const api = {
 	me: () => request<{ ok: boolean }>("/api/me"),
 
-	listConversations: (status: ConversationStatus | "all") =>
-		request<ConversationListResponse>(
-			`/api/conversations?status=${encodeURIComponent(status)}`,
-		),
+	listConversations: (query: ConversationQuery) => {
+		const params = new URLSearchParams({ status: query.status });
+		if (query.before) params.set("before", String(query.before));
+		if (query.q) params.set("q", query.q);
+		if (query.limit) params.set("limit", String(query.limit));
+		return request<ConversationListResponse>(`/api/conversations?${params}`);
+	},
+
+	stats: () => request<Stats>("/api/stats"),
 
 	listMessages: (conversationId: string, before?: number) =>
 		request<MessageListResponse>(

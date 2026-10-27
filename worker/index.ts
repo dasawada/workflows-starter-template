@@ -16,6 +16,7 @@ import { AGENT_REPLIED_EVENT } from "./workflow";
 import {
 	createPrompt,
 	getConversation,
+	getStats,
 	getReminderInstanceId,
 	insertMessage,
 	listConversations,
@@ -38,7 +39,8 @@ import type {
  * - POST /webhook/line                      LINE 平台呼叫（簽章驗證）
  * - GET  /ws?token=                         客服台即時連線
  * - GET  /api/me                            驗證 token 是否正確
- * - GET  /api/conversations?status=open     對話清單
+ * - GET  /api/conversations?status=open&before=&q=&limit=  對話清單（游標分頁、搜尋）
+ * - GET  /api/stats                         未讀總數等
  * - GET  /api/conversations/:id/messages    訊息（?before=<ts>&limit=）
  * - POST /api/conversations/:id/reply       客服回覆 { text }
  * - POST /api/conversations/:id/prompt      送可追蹤的選擇題 { body?, question, options[] }
@@ -77,8 +79,16 @@ export default {
 			const status = (url.searchParams.get("status") ?? "open") as
 				| ConversationStatus
 				| "all";
-			const conversations = await listConversations(env.DB, status);
+			const conversations = await listConversations(env.DB, status, {
+				before: Number(url.searchParams.get("before")) || undefined,
+				q: url.searchParams.get("q") ?? undefined,
+				limit: Number(url.searchParams.get("limit")) || undefined,
+			});
 			return Response.json({ conversations });
+		}
+
+		if (pathname === "/api/stats" && request.method === "GET") {
+			return Response.json(await getStats(env.DB));
 		}
 
 		if (pathname === "/api/prompts" && request.method === "GET") {
@@ -313,6 +323,7 @@ async function handleSendMessages(
 		messages: validated.messages,
 		templateKey: typeof input.templateKey === "string" ? input.templateKey : null,
 		variables: null,
+		allowChange: input.allowChange === true,
 	});
 }
 
@@ -328,6 +339,7 @@ async function sendTracked(
 		messages: Record<string, unknown>[];
 		templateKey: string | null;
 		variables: Record<string, string> | null;
+		allowChange?: boolean;
 	},
 ): Promise<Response> {
 	if (input.channel !== "line") return Response.json({ error: `channel ${input.channel} not supported yet` }, { status: 400 });
@@ -383,6 +395,7 @@ async function sendTracked(
 			options,
 			variables: input.variables,
 			payload: messages,
+			allowChange: input.allowChange ?? false,
 			createdAt: now,
 		});
 		await inbox.broadcast({ type: "prompt.updated", prompt });

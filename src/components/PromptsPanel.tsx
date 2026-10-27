@@ -125,6 +125,7 @@ export function PromptsPanel({ prompts, loading, onRefresh, onOpenConversation, 
 										</div>
 									</td>
 									<td className="px-3 py-2 whitespace-nowrap">
+										{p.allowChange && <span className="mr-1 text-[10px] text-neutral-400" title="允許更改，取最後一次">可改</span>}
 										{p.status === "answered" ? (
 											<span
 												className={`px-1.5 py-0.5 rounded font-medium ${

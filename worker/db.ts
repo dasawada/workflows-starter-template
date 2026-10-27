@@ -8,6 +8,7 @@ import type {
 	Prompt,
 	PromptOption,
 	PromptStatus,
+	Stats,
 } from "../shared/types";
 
 /**
@@ -122,25 +123,57 @@ export async function setReminderInstanceId(
 		.run();
 }
 
+/**
+ * 對話清單：游標分頁（before = 上一頁最後一筆的 last_message_at）+ 名稱搜尋。
+ * 每頁上限 100，預設 50；前端只保留畫面需要的幾頁，所以總對話數再多也不影響。
+ */
 export async function listConversations(
 	db: D1Database,
 	status: ConversationStatus | "all",
-	limit = 100,
+	options: { before?: number; q?: string; limit?: number } = {},
 ): Promise<Conversation[]> {
-	const stmt =
-		status === "all"
-			? db
-					.prepare(
-						"SELECT * FROM conversations ORDER BY last_message_at DESC LIMIT ?",
-					)
-					.bind(limit)
-			: db
-					.prepare(
-						"SELECT * FROM conversations WHERE status = ? ORDER BY last_message_at DESC LIMIT ?",
-					)
-					.bind(status, limit);
-	const { results } = await stmt.all<ConversationRow>();
+	const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
+	const where: string[] = [];
+	const binds: unknown[] = [];
+	if (status !== "all") {
+		where.push("status = ?");
+		binds.push(status);
+	}
+	if (options.before) {
+		where.push("last_message_at < ?");
+		binds.push(options.before);
+	}
+	const q = options.q?.trim();
+	if (q) {
+		where.push("(display_name LIKE ? OR external_id LIKE ?)");
+		const like = `%${q.replace(/[%_]/g, (c) => `\\${c}`)}%`;
+		binds.push(like, like);
+	}
+	const sql = `SELECT * FROM conversations
+		${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+		ORDER BY last_message_at DESC LIMIT ?`;
+	const { results } = await db
+		.prepare(sql)
+		.bind(...binds, limit)
+		.all<ConversationRow>();
 	return results.map(toConversation);
+}
+
+export async function getStats(db: D1Database): Promise<Stats> {
+	const row = await db
+		.prepare(
+			`SELECT
+				COALESCE(SUM(CASE WHEN status = 'open' THEN unread_count ELSE 0 END), 0) AS unread_total,
+				SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open_count,
+				SUM(CASE WHEN status = 'open' AND needs_attention = 1 THEN 1 ELSE 0 END) AS needs_attention_count
+			 FROM conversations`,
+		)
+		.first<{ unread_total: number; open_count: number; needs_attention_count: number }>();
+	return {
+		unreadTotal: row?.unread_total ?? 0,
+		openCount: row?.open_count ?? 0,
+		needsAttentionCount: row?.needs_attention_count ?? 0,
+	};
 }
 
 /**
@@ -419,6 +452,7 @@ interface PromptRow {
 	responded_at: number | null;
 	created_at: number;
 	payload?: string | null;
+	allow_change?: number;
 	display_name?: string | null;
 }
 
@@ -447,6 +481,7 @@ function toPrompt(row: PromptRow): Prompt {
 		respondedAt: row.responded_at,
 		createdAt: row.created_at,
 		payload: parseJson<unknown[] | null>(row.payload ?? null, null),
+		allowChange: row.allow_change === 1,
 		displayName: row.display_name ?? undefined,
 	};
 }
@@ -463,14 +498,15 @@ export async function createPrompt(
 		options: PromptOption[];
 		variables?: Record<string, string> | null;
 		payload?: unknown[] | null;
+		allowChange?: boolean;
 		createdAt: number;
 	},
 ): Promise<Prompt> {
 	await db
 		.prepare(
 			`INSERT INTO prompts
-			 (id, conversation_id, message_id, template_key, body, question, options, variables, payload, status, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+			 (id, conversation_id, message_id, template_key, body, question, options, variables, payload, allow_change, status, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
 		)
 		.bind(
 			input.id,
@@ -482,6 +518,7 @@ export async function createPrompt(
 			JSON.stringify(input.options),
 			input.variables ? JSON.stringify(input.variables) : null,
 			input.payload ? JSON.stringify(input.payload) : null,
+			input.allowChange ? 1 : 0,
 			input.createdAt,
 		)
 		.run();
@@ -506,8 +543,9 @@ export async function getPrompt(
 }
 
 /**
- * 記錄一次點擊，並把 prompt 的最新選擇更新上去。
- * 回傳 alreadyAnswered 讓呼叫端決定回覆文案。
+ * 記錄一次點擊。每一次都寫 prompt_responses（留痕）；
+ * prompt 本身的選擇只在「第一次」或「allow_change 開啟」時更新。
+ * 回傳 applied 告訴呼叫端這次點擊有沒有改變結果。
  */
 export async function recordPromptResponse(
 	db: D1Database,
@@ -515,26 +553,33 @@ export async function recordPromptResponse(
 	choice: string,
 	choiceLabel: string | null,
 	now: number,
-): Promise<{ prompt: Prompt; alreadyAnswered: boolean } | null> {
+): Promise<{ prompt: Prompt; alreadyAnswered: boolean; applied: boolean } | null> {
 	const before = await getPrompt(db, promptId);
 	if (!before) return null;
+	const alreadyAnswered = before.status === "answered";
+	const applied = !alreadyAnswered || before.allowChange;
 
-	await db.batch([
+	const statements = [
 		db
 			.prepare(
 				"INSERT INTO prompt_responses (id, prompt_id, choice, choice_label, created_at) VALUES (?, ?, ?, ?, ?)",
 			)
 			.bind(crypto.randomUUID(), promptId, choice, choiceLabel, now),
-		db
-			.prepare(
-				"UPDATE prompts SET status = 'answered', choice = ?, choice_label = ?, responded_at = ? WHERE id = ?",
-			)
-			.bind(choice, choiceLabel, now, promptId),
-	]);
+	];
+	if (applied) {
+		statements.push(
+			db
+				.prepare(
+					"UPDATE prompts SET status = 'answered', choice = ?, choice_label = ?, responded_at = ? WHERE id = ?",
+				)
+				.bind(choice, choiceLabel, now, promptId),
+		);
+	}
+	await db.batch(statements);
 
 	const prompt = await getPrompt(db, promptId);
 	if (!prompt) return null;
-	return { prompt, alreadyAnswered: before.status === "answered" };
+	return { prompt, alreadyAnswered, applied };
 }
 
 export async function listPrompts(

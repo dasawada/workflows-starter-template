@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
 	Conversation,
 	ConversationStatus,
@@ -7,6 +7,7 @@ import type {
 	Prompt,
 	PromptStatus,
 	SendMessagesInput,
+	Stats,
 } from "../shared/types";
 import { api, ApiError, getToken, setToken } from "./api";
 import { useInboxSocket } from "./hooks/useInboxSocket";
@@ -18,6 +19,9 @@ import { BuilderDialog } from "./components/builder/BuilderDialog";
 import { PromptsPanel } from "./components/PromptsPanel";
 
 const PAGE_SIZE = 50;
+/** 對話清單每頁筆數與記憶體上限；清單用虛擬捲動，所以上限只影響記憶體不影響效能 */
+const LIST_PAGE = 50;
+const LIST_CAP = 1000;
 
 type AuthState = "checking" | "anonymous" | "authed";
 
@@ -27,10 +31,20 @@ function App() {
 	const [loginBusy, setLoginBusy] = useState(false);
 
 	const [filter, setFilter] = useState<ConversationStatus | "all">("open");
+	const [query, setQuery] = useState("");
 	const [conversations, setConversations] = useState<Conversation[]>([]);
 	const [listLoading, setListLoading] = useState(false);
+	const [listHasMore, setListHasMore] = useState(true);
+	const [stats, setStats] = useState<Stats | null>(null);
+	const conversationsRef = useRef<Conversation[]>([]);
+	conversationsRef.current = conversations;
+	const listHasMoreRef = useRef(true);
+	listHasMoreRef.current = listHasMore;
+	const loadingRef = useRef(false);
 
 	const [selectedId, setSelectedId] = useState<string | null>(null);
+	/** 選中的對話獨立保存，即使它被捲出清單或不符合目前篩選也不會消失 */
+	const [selected, setSelected] = useState<Conversation | null>(null);
 	const [messages, setMessages] = useState<Message[]>([]);
 	const [messagesLoading, setMessagesLoading] = useState(false);
 	const [hasMore, setHasMore] = useState(false);
@@ -76,38 +90,94 @@ function App() {
 		setAuth("anonymous");
 		setConversations([]);
 		setSelectedId(null);
+		setSelected(null);
 		setMessages([]);
 	};
 
-	// ---------- 對話清單 ----------
-	const loadConversations = useCallback(async () => {
-		setListLoading(true);
-		try {
-			const { conversations } = await api.listConversations(filter);
-			setConversations(conversations);
-		} catch (err) {
-			if (err instanceof ApiError && err.status === 401) handleLogout();
-		} finally {
-			setListLoading(false);
-		}
-	}, [filter]);
+	// ---------- 對話清單（游標分頁） ----------
+	const loadConversations = useCallback(
+		async (reset: boolean) => {
+			if (loadingRef.current) return;
+			if (!reset && !listHasMoreRef.current) return;
+			loadingRef.current = true;
+			setListLoading(true);
+			try {
+				const current = reset ? [] : conversationsRef.current;
+				const before = current.length ? (current[current.length - 1].lastMessageAt ?? undefined) : undefined;
+				const { conversations: page } = await api.listConversations({
+					status: filter,
+					q: query || undefined,
+					before,
+					limit: LIST_PAGE,
+				});
+				setConversations((prev) => {
+					const base = reset ? [] : prev;
+					const seen = new Set(base.map((c) => c.id));
+					const merged = [...base, ...page.filter((c) => !seen.has(c.id))];
+					return merged.length > LIST_CAP ? merged.slice(0, LIST_CAP) : merged;
+				});
+				setListHasMore(page.length >= LIST_PAGE);
+			} catch (err) {
+				if (err instanceof ApiError && err.status === 401) handleLogout();
+			} finally {
+				loadingRef.current = false;
+				setListLoading(false);
+			}
+		},
+		[filter, query],
+	);
 
 	useEffect(() => {
-		if (auth === "authed") void loadConversations();
+		if (auth === "authed") void loadConversations(true);
 	}, [auth, loadConversations]);
 
+	const refreshStats = useCallback(() => {
+		api.stats().then(setStats).catch(() => {});
+	}, []);
+
+	// 事件很多時統計只每秒更新一次
+	const statsTimer = useRef<number | undefined>(undefined);
+	const scheduleStats = useCallback(() => {
+		if (statsTimer.current) return;
+		statsTimer.current = window.setTimeout(() => {
+			statsTimer.current = undefined;
+			refreshStats();
+		}, 1000);
+	}, [refreshStats]);
+
+	useEffect(() => {
+		if (auth === "authed") refreshStats();
+	}, [auth, refreshStats]);
+
+	/**
+	 * 把一筆對話放回清單的正確位置（清單依 last_message_at 由新到舊）。
+	 * 不符合篩選或搜尋就移除；比已載入的最後一筆還舊且後面還有頁，就不插入（它屬於未載入的頁）。
+	 */
 	const upsertConversation = useCallback(
 		(conversation: Conversation) => {
+			if (conversation.id === selectedId) setSelected(conversation);
 			setConversations((prev) => {
 				const matchesFilter = filter === "all" || conversation.status === filter;
+				const q = query.trim().toLowerCase();
+				const matchesQuery =
+					!q ||
+					(conversation.displayName ?? "").toLowerCase().includes(q) ||
+					conversation.externalId.toLowerCase().includes(q);
 				const rest = prev.filter((c) => c.id !== conversation.id);
-				if (!matchesFilter) return rest;
-				return [conversation, ...rest].sort(
-					(a, b) => (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0),
-				);
+				if (!matchesFilter || !matchesQuery) return rest;
+
+				const ts = conversation.lastMessageAt ?? 0;
+				let idx = rest.findIndex((c) => (c.lastMessageAt ?? 0) < ts);
+				if (idx === -1) {
+					if (listHasMoreRef.current && rest.length > 0) return rest;
+					idx = rest.length;
+				}
+				const next = rest.slice();
+				next.splice(idx, 0, conversation);
+				return next.length > LIST_CAP ? next.slice(0, LIST_CAP) : next;
 			});
 		},
-		[filter],
+		[filter, query, selectedId],
 	);
 
 	// ---------- 訊息 ----------
@@ -132,13 +202,18 @@ function App() {
 
 		api
 			.markRead(selectedId)
-			.then(({ conversation }) => conversation && upsertConversation(conversation))
+			.then(({ conversation }) => {
+				if (!conversation) return;
+				setSelected(conversation);
+				upsertConversation(conversation);
+				scheduleStats();
+			})
 			.catch(() => {});
 
 		return () => {
 			cancelled = true;
 		};
-	}, [selectedId, upsertConversation]);
+	}, [selectedId, upsertConversation, scheduleStats]);
 
 	const loadMore = async () => {
 		if (!selectedId || messages.length === 0) return;
@@ -178,8 +253,10 @@ function App() {
 					}
 				}
 				upsertConversation(event.conversation);
+				scheduleStats();
 			} else if (event.type === "conversation.updated") {
 				upsertConversation(event.conversation);
+				scheduleStats();
 			} else if (event.type === "prompt.updated") {
 				setPrompts((prev) => {
 					const matches =
@@ -190,21 +267,24 @@ function App() {
 				});
 			}
 		},
-		[selectedId, upsertConversation, promptsFilter],
+		[selectedId, upsertConversation, promptsFilter, scheduleStats],
 	);
 
 	const { connected } = useInboxSocket(auth === "authed", onEvent);
 
-	// 重連後重新抓一次清單，補上斷線期間漏掉的更新
+	// 重連後重新抓一次清單與統計，補上斷線期間漏掉的更新
 	useEffect(() => {
-		if (connected && auth === "authed") void loadConversations();
-	}, [connected, auth, loadConversations]);
+		if (connected && auth === "authed") {
+			void loadConversations(true);
+			refreshStats();
+		}
+	}, [connected, auth, loadConversations, refreshStats]);
 
 	// ---------- 操作 ----------
-	const selected = useMemo(
-		() => conversations.find((c) => c.id === selectedId) ?? null,
-		[conversations, selectedId],
-	);
+	const selectConversation = useCallback((id: string | null) => {
+		setSelectedId(id);
+		setSelected(id ? (conversationsRef.current.find((c) => c.id === id) ?? null) : null);
+	}, []);
 
 	const handleSend = async (text: string) => {
 		if (!selectedId) return;
@@ -238,7 +318,7 @@ function App() {
 		const next: ConversationStatus = selected.status === "open" ? "closed" : "open";
 		const { conversation } = await api.setStatus(selected.id, next);
 		upsertConversation(conversation);
-		if (filter !== "all" && conversation.status !== filter) setSelectedId(null);
+		scheduleStats();
 	};
 
 	// ---------- 畫面 ----------
@@ -253,15 +333,20 @@ function App() {
 		return <Login error={loginError} busy={loginBusy} onSubmit={handleLogin} />;
 	}
 
-	const totalUnread = conversations.reduce((n, c) => n + c.unreadCount, 0);
+	const totalUnread = stats?.unreadTotal ?? 0;
 
 	return (
 		<div className="h-screen flex flex-col bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100">
 			<header className="flex items-center gap-3 px-4 h-12 border-b border-neutral-200 dark:border-neutral-800 shrink-0">
 				<span className="text-sm font-semibold">客服收發台</span>
 				{totalUnread > 0 && (
-					<span className="text-[11px] px-1.5 py-0.5 rounded-full bg-emerald-600 text-white font-semibold">
-						{totalUnread}
+					<span className="text-[11px] px-1.5 py-0.5 rounded-full bg-emerald-600 text-white font-semibold" title="未讀訊息總數">
+						{totalUnread > 999 ? "999+" : totalUnread}
+					</span>
+				)}
+				{(stats?.needsAttentionCount ?? 0) > 0 && (
+					<span className="text-[11px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300 font-semibold" title="逾時未回覆">
+						逾時 {stats!.needsAttentionCount}
 					</span>
 				)}
 				<button
@@ -302,12 +387,16 @@ function App() {
 						conversations={conversations}
 						selectedId={selectedId}
 						filter={filter}
+						query={query}
 						loading={listLoading}
-						onSelect={setSelectedId}
+						hasMore={listHasMore}
+						onSelect={selectConversation}
 						onFilterChange={(f) => {
 							setFilter(f);
-							setSelectedId(null);
+							selectConversation(null);
 						}}
+						onQueryChange={setQuery}
+						onLoadMore={() => void loadConversations(false)}
 					/>
 				</aside>
 
@@ -319,8 +408,7 @@ function App() {
 							onRefresh={loadPrompts}
 							onOpenConversation={(id) => {
 								setPromptsPanelOpen(false);
-								setFilter("all");
-								setSelectedId(id);
+								selectConversation(id);
 							}}
 							onClose={() => setPromptsPanelOpen(false)}
 						/>
@@ -334,7 +422,7 @@ function App() {
 							onSend={handleSend}
 							onOpenPrompt={() => setComposeMode("builder")}
 							onToggleStatus={() => void handleToggleStatus()}
-							onBack={() => setSelectedId(null)}
+							onBack={() => selectConversation(null)}
 						/>
 					) : (
 						<div className="h-full flex items-center justify-center text-sm text-neutral-400">

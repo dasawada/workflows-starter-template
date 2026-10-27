@@ -53,7 +53,15 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 - 新增渠道（如 Teams）時：新增 `worker/<channel>.ts` 與 `worker/webhook-<channel>.ts`，資料寫入仍走 `db.ts`，`channel` 欄位填對應值，`handleReply` 依 `channel` 分派。
 - 部署流程改動（新 binding、新資源）要同步更新 README 的「正式部署」段落。
 
+## 效能與成本原則
+
+- 對話清單：後端游標分頁（`before` = 上一頁最後一筆的 `last_message_at`）+ `q` 搜尋；前端虛擬捲動（`ConversationList.tsx` 固定列高 68px）、記憶體上限 1000 筆、事件以「移除再插入正確位置」更新，不整個重排。新功能不得回到「一次載入全部對話」或「每個事件重排整個陣列」。
+- 統計數字（未讀總數等）一律由 `/api/stats` 查 D1，不在前端加總已載入的列。
+- 不要為每個對話建立 Durable Object；不要讓 Workflow 實例數跟訊息數成正比（每個對話同時最多一個提醒實例）。
+
 ## 已知事項
+
+- LINE 按鈕可反覆按：`recordPromptResponse` 每次都寫 `prompt_responses`，但只有第一次（或 `allow_change = 1`）會更新 `prompts` 的結果；重複按會回覆「以第一次回覆為準」。
 
 - `wrangler.jsonc` 的 `migrations`（Durable Object）只能追加新 tag，絕不能改寫或刪除已部署過的 tag，否則 Cloudflare 會略過它並在部署時報 10064。正式環境目前已套用到 `v2`。
 - 正式環境的 Worker `workflows-starter-template` 曾部署過原始範本，舊的 Workflow `my-workflow` 可能殘留在 dashboard，不影響運作，可手動刪除。

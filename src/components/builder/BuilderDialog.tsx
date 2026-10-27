@@ -35,6 +35,7 @@ export function BuilderDialog({ onClose, onSend, onSwitchToJson }: Props) {
 	const [presetKey, setPresetKey] = useState(saved?.presetKey ?? BUILDER_PRESETS[0].key);
 	const [draft, setDraft] = useState<BuilderDraft>(saved?.draft ?? BUILDER_PRESETS[0].build());
 	const [openId, setOpenId] = useState<string | null>(draft.messages[0]?.id ?? null);
+	const [allowChange, setAllowChange] = useState(false);
 	const [sending, setSending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -87,7 +88,7 @@ export function BuilderDialog({ onClose, onSend, onSwitchToJson }: Props) {
 		setError(null);
 		setSending(true);
 		try {
-			await onSend({ messages, templateKey: `builder:${presetKey}` });
+			await onSend({ messages, templateKey: `builder:${presetKey}`, allowChange });
 			onClose();
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "送出失敗");
@@ -225,7 +226,13 @@ export function BuilderDialog({ onClose, onSend, onSwitchToJson }: Props) {
 					</div>
 				</div>
 
-				<div className="flex items-center gap-2 px-5 py-3 border-t border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
+				<div className="flex items-center gap-3 px-5 py-3 border-t border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
+					{trackable > 0 && (
+						<label className="flex items-center gap-1.5 text-xs text-neutral-600 dark:text-neutral-400" title="LINE 的按鈕可以反覆按；預設只採用第一次，之後再按只回覆提示不改結果">
+							<input type="checkbox" checked={allowChange} onChange={(e) => setAllowChange(e.target.checked)} className="accent-emerald-600" />
+							允許使用者更改回覆（取最後一次）
+						</label>
+					)}
 					{error && <span className="text-xs text-red-600">{error}</span>}
 					{!error && errors.length > 0 && (
 						<span className="text-xs text-amber-600">還有 {errors.length} 項要修正才能送出</span>

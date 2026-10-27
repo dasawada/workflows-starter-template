@@ -74,6 +74,8 @@ export interface Prompt {
 	createdAt: number;
 	/** 實際送出的 LINE 訊息陣列 */
 	payload: unknown[] | null;
+	/** 使用者重複按按鈕時是否採用最後一次（false = 第一次為準） */
+	allowChange: boolean;
 	/** 列表用：對話的顯示名稱 */
 	displayName?: string | null;
 }
@@ -83,6 +85,22 @@ export interface SendMessagesInput {
 	messages: unknown[];
 	templateKey?: string;
 	note?: string;
+	/** 允許使用者更改回覆（取最後一次）；預設第一次為準 */
+	allowChange?: boolean;
+}
+
+export interface ConversationQuery {
+	status: ConversationStatus | "all";
+	/** 游標：只回傳 last_message_at 小於此值的對話 */
+	before?: number;
+	q?: string;
+	limit?: number;
+}
+
+export interface Stats {
+	unreadTotal: number;
+	openCount: number;
+	needsAttentionCount: number;
 }
 
 export interface SendPromptInput {

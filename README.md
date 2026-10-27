@@ -91,10 +91,11 @@ npm run dev                      # http://localhost:5173，只看 UI 排版
 | POST | `/webhook/line` | LINE 平台呼叫（X-Line-Signature 驗證） |
 | GET | `/ws` | 即時事件：`message.new`、`conversation.updated` |
 | GET | `/api/me` | 驗證 token |
-| GET | `/api/conversations?status=open\|closed\|all` | 對話清單 |
+| GET | `/api/conversations?status=open\|closed\|all&before=<ts>&q=<關鍵字>&limit=50` | 對話清單（游標分頁、搜尋名稱或 ID） |
+| GET | `/api/stats` | 未讀總數、進行中數、逾時數 |
 | GET | `/api/conversations/:id/messages?before=&limit=` | 訊息（舊→新） |
 | POST | `/api/conversations/:id/reply` | `{ "text": "..." }` |
-| POST | `/api/conversations/:id/send` | `{ "messages": [LINE 訊息…], "templateKey"? }` 直接送訊息陣列（最多 5 則），postback 自動追蹤 |
+| POST | `/api/conversations/:id/send` | `{ "messages": [LINE 訊息…], "templateKey"?, "allowChange"? }` 直接送訊息陣列（最多 5 則），postback 自動追蹤；`allowChange` 預設 false，使用者重複按只留紀錄不改結果 |
 | POST | `/api/conversations/:id/prompt` | `{ "body"?, "question", "options": [{label,value}] }` 舊介面：正文 + Confirm 是／否 |
 | GET | `/api/prompts?status=all\|pending\|answered&conversationId=` | 可追蹤訊息與使用者的選擇 |
 | POST | `/api/conversations/:id/read` | 清除未讀 |
@@ -111,9 +112,16 @@ npm run lint
 npm run deploy
 ```
 
+## 規模與效能
+
+- 對話清單用虛擬捲動，只渲染畫面上看得到的列，捲到底才向後端要下一頁（每頁 50 筆，記憶體最多保留 1000 筆）。對話總數再多也不影響畫面流暢度。
+- 未讀總數與逾時數由後端 `/api/stats` 一次算出，不靠前端加總。
+- 成本只與訊息數線性相關：每則訊息約 3 次 D1 寫入；Durable Object 只有一個且閒置休眠；逾時提醒 Workflow 每個對話同時最多一個實例，客服回覆或逾時即結束。對話開著多久都不會額外計費。
+
 ## 已知限制
 
 - 客服台目前是單一共用密鑰，沒有個別帳號與權限；多人使用建議改接 Cloudflare Access 或自建帳號。
 - 一般回覆只能純文字；LINE 的圖片／貼圖／Flex Message 發送可在 `worker/line.ts` 的 `push()` 擴充。
+- LINE 的按鈕訊息會永遠留在聊天室且可反覆按，LINE 沒有「按過即失效」的機制；本系統預設第一次回覆為準，之後再按只寫入 `prompt_responses` 並回覆提示。送出時勾「允許使用者更改回覆」則改為取最後一次。
 - 互動訊息的 JSON 由 LINE API 做最終驗證，格式錯誤會以 502 把 LINE 的錯誤訊息回到客服台；客服台的預覽是近似呈現，精確版面請用 LINE Flex Message Simulator。
 - Teams 尚未實作（schema 與渠道層已預留）。

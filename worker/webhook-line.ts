@@ -286,7 +286,7 @@ async function handlePostback(
 		now,
 	);
 	if (!result) return;
-	const { prompt } = result;
+	const { prompt, applied } = result;
 
 	const inserted = await insertMessage(env.DB, {
 		id: crypto.randomUUID(),
@@ -294,7 +294,7 @@ async function handlePostback(
 		direction: "inbound",
 		sender: "user",
 		type: "text",
-		text: `已選擇：${label}`,
+		text: applied ? `已選擇：${label}` : `再次點選：${label}（未採用，以先前回覆為準）`,
 		metadata: { promptId: prompt.id, choice: parsed.choice },
 		externalId: event.webhookEventId ? `postback:${event.webhookEventId}` : null,
 		createdAt: now,
@@ -330,9 +330,11 @@ async function handlePostback(
 	await inbox.broadcast({ type: "prompt.updated", prompt });
 
 	if (event.replyToken) {
-		const text = result.alreadyAnswered
-			? `已更新您的選擇為「${label}」。`
-			: `已收到您的選擇「${label}」，謝謝！`;
+		const text = !applied
+			? `您已於 ${formatTime(prompt.respondedAt ?? now)} 回覆「${prompt.choiceLabel ?? prompt.choice}」，此題以第一次回覆為準。如需更改，請直接留言告訴我們。`
+			: result.alreadyAnswered
+				? `已更新您的選擇為「${label}」。`
+				: `已收到您的選擇「${label}」，謝謝！`;
 		try {
 			await client.reply(event.replyToken, [{ type: "text", text }]);
 			await insertMessage(env.DB, {
@@ -348,6 +350,17 @@ async function handlePostback(
 			console.error("postback reply failed", err);
 		}
 	}
+}
+
+function formatTime(ts: number): string {
+	return new Intl.DateTimeFormat("zh-TW", {
+		timeZone: "Asia/Taipei",
+		month: "numeric",
+		day: "numeric",
+		hour: "2-digit",
+		minute: "2-digit",
+		hour12: false,
+	}).format(new Date(ts));
 }
 
 async function storeMedia(

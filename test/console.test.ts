@@ -263,3 +263,30 @@ describe("conversation status", () => {
 		expect(conversations.find((c) => c.id === "line:U-frank")).toBeUndefined();
 	});
 });
+
+describe("conversation list paging, search and stats", () => {
+	it("pages by cursor, searches by name and reports stats", async () => {
+		for (const [i, name] of ["甲老師", "乙老師", "丙老師"].entries()) {
+			mockLine("GET", `/v2/bot/profile/U-page-${i}`, lineJson({ displayName: name }));
+			await postWebhook([{ ...textEvent(`U-page-${i}`, `msg ${i}`, `m-page-${i}`), timestamp: 1_700_000_000_000 + i * 1000 }]);
+		}
+		const first = await SELF.fetch("https://console.test/api/conversations?status=all&limit=2", { headers: AUTH });
+		const page1 = ((await first.json()) as { conversations: Conversation[] }).conversations;
+		expect(page1.length).toBe(2);
+		const cursor = page1[page1.length - 1].lastMessageAt!;
+		const second = await SELF.fetch(`https://console.test/api/conversations?status=all&limit=2&before=${cursor}`, { headers: AUTH });
+		const page2 = ((await second.json()) as { conversations: Conversation[] }).conversations;
+		expect(page2.every((c) => c.lastMessageAt! < cursor)).toBe(true);
+		expect(new Set([...page1, ...page2].map((c) => c.id)).size).toBe(page1.length + page2.length);
+
+		const search = await SELF.fetch("https://console.test/api/conversations?status=all&q=%E4%B9%99", { headers: AUTH });
+		const found = ((await search.json()) as { conversations: Conversation[] }).conversations;
+		expect(found.some((c) => c.displayName === "乙老師")).toBe(true);
+		expect(found.every((c) => c.displayName?.includes("乙") || c.externalId.includes("乙"))).toBe(true);
+
+		const stats = await SELF.fetch("https://console.test/api/stats", { headers: AUTH });
+		const s = (await stats.json()) as { unreadTotal: number; openCount: number };
+		expect(s.openCount).toBeGreaterThanOrEqual(3);
+		expect(s.unreadTotal).toBeGreaterThanOrEqual(3);
+	});
+});

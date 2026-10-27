@@ -186,8 +186,12 @@ describe("trackable prompts", () => {
 		expect(messages.some((m) => m.sender === "user" && m.text === "已選擇：是")).toBe(true);
 		expect(messages.some((m) => m.sender === "system" && m.text?.includes("已收到您的選擇「是」"))).toBe(true);
 
-		// 重複點擊：更新為「否」，並留下第二筆回覆紀錄
-		mockLine("POST", "/v2/bot/message/reply", ok());
+		// 重複點擊：預設以第一次為準，結果不變，但留下第二筆回覆紀錄並回覆提示
+		let replied: { messages: Array<{ text: string }> } | null = null;
+		mockLine("POST", "/v2/bot/message/reply", async (req) => {
+			replied = (await req.json()) as typeof replied;
+			return Response.json({});
+		});
 		await postWebhook([
 			{
 				type: "postback",
@@ -200,11 +204,67 @@ describe("trackable prompts", () => {
 		]);
 		const after = await SELF.fetch(`https://console.test/api/prompts?conversationId=line%3AU-teacher`, { headers: AUTH });
 		const afterList = (await after.json()) as { prompts: Prompt[] };
-		expect(afterList.prompts.find((p) => p.id === prompt.id)).toMatchObject({ choice: "no", choiceLabel: "否" });
+		expect(afterList.prompts.find((p) => p.id === prompt.id)).toMatchObject({ choice: "yes", choiceLabel: "是" });
+		expect(replied!.messages[0].text).toContain("以第一次回覆為準");
 		const responses = await env.DB.prepare("SELECT COUNT(*) AS n FROM prompt_responses WHERE prompt_id = ?")
 			.bind(prompt.id)
 			.first<{ n: number }>();
 		expect(responses?.n).toBe(2);
+		const msgsAfter = await SELF.fetch(
+			"https://console.test/api/conversations/line%3AU-teacher/messages",
+			{ headers: AUTH },
+		);
+		const { messages: all } = (await msgsAfter.json()) as { messages: Message[] };
+		expect(all.some((m) => m.text?.startsWith("再次點選：否"))).toBe(true);
+	});
+
+	it("takes the latest answer when allowChange is on", async () => {
+		await seedUser("U-change", "可改老師");
+		let pushed: { messages: Array<Record<string, unknown>> } | null = null;
+		mockLine("POST", "/v2/bot/message/push", async (req) => {
+			pushed = (await req.json()) as typeof pushed;
+			return Response.json({});
+		});
+		const res = await SELF.fetch("https://console.test/api/conversations/line%3AU-change/send", {
+			method: "POST",
+			headers: { ...AUTH, "Content-Type": "application/json" },
+			body: JSON.stringify({
+				allowChange: true,
+				messages: [
+					{
+						type: "template",
+						altText: "Q",
+						template: {
+							type: "confirm",
+							text: "Q",
+							actions: [
+								{ type: "postback", label: "是", data: "yes" },
+								{ type: "postback", label: "否", data: "no" },
+							],
+						},
+					},
+				],
+			}),
+		});
+		const { prompt } = (await res.json()) as { prompt: Prompt };
+		expect(prompt.allowChange).toBe(true);
+		const actions = (pushed!.messages[0].template as { actions: Array<{ data: string }> }).actions;
+		for (const [i, data] of [actions[0].data, actions[1].data].entries()) {
+			mockLine("POST", "/v2/bot/message/reply", ok());
+			await postWebhook([
+				{
+					type: "postback",
+					timestamp: Date.now() + i,
+					source: { type: "user", userId: "U-change" },
+					replyToken: `rt-c${i}`,
+					webhookEventId: `evt-change-${i}`,
+					postback: { data },
+				},
+			]);
+		}
+		const list = await SELF.fetch("https://console.test/api/prompts?conversationId=line%3AU-change", { headers: AUTH });
+		const { prompts } = (await list.json()) as { prompts: Prompt[] };
+		expect(prompts.find((p) => p.id === prompt.id)).toMatchObject({ choice: "no", choiceLabel: "否" });
 	});
 
 	it("ignores postbacks for unknown prompts", async () => {

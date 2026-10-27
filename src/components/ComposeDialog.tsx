@@ -38,6 +38,7 @@ export function ComposeDialog({ onClose, onSend, initialMessages, onBackToBuilde
 			? JSON.stringify(initialMessages, null, 2)
 			: (draft?.text ?? JSON.stringify(MESSAGE_PRESETS[0].messages, null, 2)),
 	);
+	const [allowChange, setAllowChange] = useState(false);
 	const [sending, setSending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -82,7 +83,7 @@ export function ComposeDialog({ onClose, onSend, initialMessages, onBackToBuilde
 		setError(null);
 		setSending(true);
 		try {
-			await onSend({ messages: parsed.messages, templateKey: presetKey });
+			await onSend({ messages: parsed.messages, templateKey: presetKey, allowChange });
 			onClose();
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "送出失敗");
@@ -171,8 +172,14 @@ export function ComposeDialog({ onClose, onSend, initialMessages, onBackToBuilde
 					</div>
 				</div>
 
-				<div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-neutral-200 dark:border-neutral-800">
-					{error && <span className="text-xs text-red-600 mr-auto">{error}</span>}
+				<div className="flex items-center justify-end gap-3 px-5 py-3 border-t border-neutral-200 dark:border-neutral-800">
+					{postbackCount > 0 && (
+						<label className="mr-auto flex items-center gap-1.5 text-xs text-neutral-600 dark:text-neutral-400">
+							<input type="checkbox" checked={allowChange} onChange={(e) => setAllowChange(e.target.checked)} className="accent-emerald-600" />
+							允許使用者更改回覆（取最後一次）
+						</label>
+					)}
+					{error && <span className="text-xs text-red-600">{error}</span>}
 					<button onClick={onClose} className="text-sm px-4 py-2 rounded-lg text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800">
 						取消
 					</button>
