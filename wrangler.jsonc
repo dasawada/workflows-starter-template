@@ -71,9 +71,18 @@
 			}
 		]
 	},
+	/**
+	 * Durable Object migrations：只能往後追加，不可改寫已部署過的 tag。
+	 * v1 是原始範本的類別（已在正式環境套用過），v2 移除它並建立 InboxDO。
+	 */
 	"migrations": [
 		{
 			"tag": "v1",
+			"new_sqlite_classes": ["WorkflowStatusDO"]
+		},
+		{
+			"tag": "v2",
+			"deleted_classes": ["WorkflowStatusDO"],
 			"new_sqlite_classes": ["InboxDO"]
 		}
 	],

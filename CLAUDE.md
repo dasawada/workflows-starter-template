@@ -51,6 +51,8 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 
 ## 已知事項
 
+- `wrangler.jsonc` 的 `migrations`（Durable Object）只能追加新 tag，絕不能改寫或刪除已部署過的 tag，否則 Cloudflare 會略過它並在部署時報 10064。正式環境目前已套用到 `v2`。
+- 正式環境的 Worker `workflows-starter-template` 曾部署過原始範本，舊的 Workflow `my-workflow` 可能殘留在 dashboard，不影響運作，可手動刪除。
 - `test/reminder.test.ts` 會印一行 `WorkflowTimeoutError` 的 uncaught exception，來自測試工具 `forceEventTimeout` 內部，測試本身通過，可忽略。
 - 客服台目前為單一共用 `CONSOLE_TOKEN`，無個別帳號。
 - 只能回覆純文字，圖片／Flex Message 發送尚未做。
