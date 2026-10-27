@@ -51,6 +51,7 @@
 		"db:migrate:local": "wrangler d1 migrations apply DB --local",
 		"db:migrate": "wrangler d1 migrations apply DB --remote",
 		"lint": "eslint .",
+		"loadtest": "node scripts/loadtest.mjs",
 		"preview": "npm run build && vite preview",
 		"test": "vitest run"
 	},

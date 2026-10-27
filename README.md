@@ -123,6 +123,17 @@ npm run deploy
 - 未讀總數與逾時數由後端 `/api/stats` 一次算出，不靠前端加總。
 - 成本只與訊息數線性相關：每則訊息約 3 次 D1 寫入；Durable Object 只有一個且閒置休眠；逾時提醒 Workflow 每個對話同時最多一個實例，客服回覆或逾時即結束。對話開著多久都不會額外計費。
 
+## 壓測與驗證
+
+`scripts/loadtest.mjs` 對正式環境的 webhook 發出 N 則合法簽章的假事件，量測回應時間、吞吐、入庫完成時間與 `cf-placement` 標頭：
+
+```bash
+LINE_CHANNEL_SECRET=<channel secret> CONSOLE_TOKEN=<token> \
+  npm run loadtest -- --url https://<worker 網址> --count 200 --concurrency 20
+```
+
+密鑰只從環境變數讀取。結束時會印出清理這次測試資料的 `wrangler d1 execute` 指令。
+
 ## 監控
 
 所有指標寫進 Analytics Engine 資料集 `cs_console_metrics`（dashboard → Analytics & Logs → Analytics Engine，或用 SQL API 接 Grafana）。欄位：`blob1` 指標名、`blob2…` 標籤、`double1…` 數值。
