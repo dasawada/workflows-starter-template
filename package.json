@@ -46,7 +46,7 @@
 		"build": "tsc -b && vite build",
 		"cf-typegen": "wrangler types",
 		"check": "tsc && wrangler deploy --dry-run",
-		"deploy": "npm run build && wrangler deploy",
+		"deploy": "npm run build && bash scripts/bootstrap.sh",
 		"dev": "vite",
 		"db:migrate:local": "wrangler d1 migrations apply DB --local",
 		"db:migrate": "wrangler d1 migrations apply DB --remote",

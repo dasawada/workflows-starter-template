@@ -62,16 +62,16 @@ npm run dev                      # http://localhost:5173，只看 UI 排版
 2. 設定：
    | 欄位 | 值 |
    | --- | --- |
-   | Project name | `cs-console` |
+   | Project name | `workflows-starter-template`（必須與 `wrangler.jsonc` 的 `name` 一致） |
    | Production branch | `main` |
    | Build command | `npm run build` |
-   | Deploy command | `bash scripts/bootstrap.sh` |
+   | Deploy command | `npm run deploy`（預設值即可，會呼叫 `scripts/bootstrap.sh`） |
 3. 按 Save and Deploy。`scripts/bootstrap.sh` 會自動建立 D1（`cs-console-db`）與 R2（`cs-console-media`）、套用 schema、部署；若建置環境無權建立資源，先在 dashboard 手動建好同名資源再重跑。
-4. 部署完成後到 **cs-console → Settings → Variables and Secrets**，新增三個 Secret：`LINE_CHANNEL_SECRET`、`LINE_CHANNEL_ACCESS_TOKEN`、`CONSOLE_TOKEN`。
+4. 部署完成後到 **該 Worker → Settings → Variables and Secrets**，新增三個 Secret：`LINE_CHANNEL_SECRET`、`LINE_CHANNEL_ACCESS_TOKEN`、`CONSOLE_TOKEN`。
 
 之後每次 push 到 `main` 都會自動建置部署。
 
-手動部署（替代方案）：`npx wrangler login` 後執行 `npm run build && bash scripts/bootstrap.sh`。
+手動部署（替代方案）：`npx wrangler login` 後執行 `npm run deploy`。
 
 接著到 LINE Developers Console：
 

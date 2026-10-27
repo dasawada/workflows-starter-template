@@ -8,7 +8,7 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 
 ## 驗證方式（重要）
 
-- 部署走 GitHub → Cloudflare Workers Builds：push 到 `main` 即自動建置（`npm run build`）並執行 `bash scripts/bootstrap.sh`（建 D1/R2、寫入 database_id、套 schema、`wrangler deploy`）。
+- 部署走 GitHub → Cloudflare Workers Builds：push 到 `main` 即自動建置（`npm run build`）並執行 `npm run deploy`（內含 `scripts/bootstrap.sh`）（建 D1/R2、寫入 database_id、套 schema、`wrangler deploy`）。
 - Claude 的職責是改好程式、通過 `npm run check` 與 `npm test`、commit 並 push 到 `main`；部署與密鑰設定在 Cloudflare dashboard 完成，Claude 不需要也不應登入 Cloudflare。
 - `wrangler.jsonc` 的 `database_id` 由 bootstrap 在建置時寫入，本機留 `REPLACE_WITH_YOUR_D1_DATABASE_ID` 即可。
 - **一切功能都在正式環境部署後直接驗證**，不以本機開發伺服器為驗證依據。
@@ -19,7 +19,8 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 ## 密鑰與設定
 
 - 機密三個：`LINE_CHANNEL_SECRET`、`LINE_CHANNEL_ACCESS_TOKEN`、`CONSOLE_TOKEN`。
-  **由使用者自行在 Cloudflare dashboard（Workers & Pages → cs-console → Settings → Variables and Secrets）輸入。**
+  **由使用者自行在 Cloudflare dashboard（Workers & Pages → 該 Worker → Settings → Variables and Secrets）輸入。**
+- `wrangler.jsonc` 的 `name` 必須與 dashboard 的 Worker 專案名稱一致（目前 `workflows-starter-template`），否則 Workers Builds 部署會失敗。
   Claude 不執行 `wrangler secret put`、不建立 `.dev.vars`、不把任何密鑰或環境資訊寫進 `wrangler.jsonc` 或其他設定檔。
   `.dev.vars.example` 只是空白範本。
 - 非機密設定放 `wrangler.jsonc` 的 `vars`（`REPLY_SLA_MINUTES`、`WELCOME_MESSAGE`）。

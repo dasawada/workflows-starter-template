@@ -4,7 +4,8 @@
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "cs-console",
+	// 必須與 Cloudflare dashboard 的 Worker 專案名稱一致
+	"name": "workflows-starter-template",
 	"main": "worker/index.ts",
 	"compatibility_date": "2025-10-08",
 	"assets": {

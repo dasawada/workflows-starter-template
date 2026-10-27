@@ -52,7 +52,7 @@ npx wrangler deploy
 cat <<MSG
 
 完成。若尚未設定密鑰，請到 Cloudflare dashboard：
-  Workers & Pages → cs-console → Settings → Variables and Secrets
+  Workers & Pages → 該 Worker → Settings → Variables and Secrets
   新增三個 Secret：LINE_CHANNEL_SECRET、LINE_CHANNEL_ACCESS_TOKEN、CONSOLE_TOKEN
 再到 LINE Developers Console 設定 Webhook URL：https://<worker 網址>/webhook/line
 MSG
