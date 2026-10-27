@@ -113,5 +113,6 @@ npm run deploy
 ## 已知限制
 
 - 客服台目前是單一共用密鑰，沒有個別帳號與權限；多人使用建議改接 Cloudflare Access 或自建帳號。
-- 目前只能回覆純文字；LINE 的圖片／貼圖／Flex Message 發送可在 `worker/line.ts` 的 `push()` 擴充。
+- 一般回覆只能純文字；LINE 的圖片／貼圖／Flex Message 發送可在 `worker/line.ts` 的 `push()` 擴充。
+- 可追蹤訊息的按鈕最多兩顆（LINE Confirm template 的限制），問句最多 240 字。
 - Teams 尚未實作（schema 與渠道層已預留）。

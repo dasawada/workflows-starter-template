@@ -37,6 +37,7 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 | `worker/db.ts` | 所有 SQL 集中於此 |
 | `worker/inbox-do.ts` | 單一實例 `InboxDO`（名稱固定 `"inbox"`），WebSocket 廣播 |
 | `worker/workflow.ts` | `ReplyReminderWorkflow` 逾時提醒 |
+| `src/templates.ts` | 可追蹤訊息範本；`{{變數}}` 自動變表單欄位，新增範本只要加一筆 |
 | `migrations/` | D1 schema，新增欄位一律新開 migration 檔，不改舊檔 |
 | `shared/types.ts` | 前後端共用型別，API 回傳格式改動要先改這裡 |
 | `src/` | React 客服台；`src/api.ts` 是唯一打 API 的地方 |
@@ -55,4 +56,5 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 - 正式環境的 Worker `workflows-starter-template` 曾部署過原始範本，舊的 Workflow `my-workflow` 可能殘留在 dashboard，不影響運作，可手動刪除。
 - `test/reminder.test.ts` 會印一行 `WorkflowTimeoutError` 的 uncaught exception，來自測試工具 `forceEventTimeout` 內部，測試本身通過，可忽略。
 - 客服台目前為單一共用 `CONSOLE_TOKEN`，無個別帳號。
-- 只能回覆純文字，圖片／Flex Message 發送尚未做。
+- 一般回覆只能純文字，圖片／Flex Message 發送尚未做。
+- 可追蹤訊息（prompts）：送出走 `POST /api/conversations/:id/prompt`，LINE 以 Confirm template 呈現，使用者點選後以 `postback` 事件回來（data 格式 `prompt=<id>&choice=<value>`），`worker/webhook-line.ts` 的 `handlePostback` 寫入 `prompts` / `prompt_responses`。按鈕最多兩顆。
