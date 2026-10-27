@@ -37,7 +37,9 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 | `worker/db.ts` | 所有 SQL 集中於此 |
 | `worker/inbox-do.ts` | 單一實例 `InboxDO`（名稱固定 `"inbox"`），WebSocket 廣播 |
 | `worker/workflow.ts` | `ReplyReminderWorkflow` 逾時提醒 |
-| `src/presets.ts` | 互動訊息範例（LINE 訊息陣列 JSON），新增範例只要加一筆 |
+| `src/builder/` | 傻瓜編輯台的核心：`limits.ts`（LINE 上限，所有欄位以此為準）、`types.ts`（草稿結構）、`toLine.ts`（草稿→LINE JSON，輸出必定合法；`validateDraft` 列出必填缺漏）、`presets.ts`（表單範本） |
+| `src/components/builder/` | 編輯台 UI：`BuilderDialog`（主畫面）、`MessageForm`（各類型表單）、`ActionEditor`（按鈕）、`fields.tsx`（含字數計數的輸入框） |
+| `src/presets.ts` | JSON 模式的範例（LINE 訊息陣列），給進階使用者 |
 | `src/components/LinePreview.tsx` | 近似重現 LINE 呈現的預覽（template / flex / quick reply） |
 | `migrations/` | D1 schema，新增欄位一律新開 migration 檔，不改舊檔 |
 | `shared/types.ts` | 前後端共用型別，API 回傳格式改動要先改這裡 |
@@ -58,4 +60,5 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 - `test/reminder.test.ts` 會印一行 `WorkflowTimeoutError` 的 uncaught exception，來自測試工具 `forceEventTimeout` 內部，測試本身通過，可忽略。
 - 客服台目前為單一共用 `CONSOLE_TOKEN`，無個別帳號。
 - 一般回覆只能純文字，圖片／Flex Message 發送尚未做。
+- 互動訊息編輯台只產生五種受控版型（text / confirm / buttons / carousel / 固定版面的 Flex 資訊卡），不開放自由 Flex；新版型要先在 `types.ts` 加草稿型別、`toLine.ts` 加轉換與檢查、`MessageForm.tsx` 加表單，並在 `test/builder.test.ts` 加測試。
 - 互動訊息：`POST /api/conversations/:id/send` 接任意 LINE 訊息陣列；`worker/line.ts` 的 `instrumentPostbacks` 會把所有 postback 的 data 改寫成 `prompt=<id>&choice=<原 data 或 label>` 並萃取選項，有 postback 才建立 `prompts` 紀錄（message type `prompt`），否則 type `rich`。使用者點選後 `worker/webhook-line.ts` 的 `handlePostback` 寫入 `prompts` / `prompt_responses`。`/prompt` 是舊介面，內部也走同一條 `sendTracked`。

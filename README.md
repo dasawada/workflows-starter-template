@@ -6,7 +6,7 @@
 - **發訊**：客服在網頁上回覆 → LINE Push API → 存入 D1 → 廣播給其他在線客服
 - **媒體**：使用者傳的圖片／影片／語音／檔案背景下載到 R2，客服台直接顯示
 - **逾時提醒**：Cloudflare Workflows 監看每個對話，客服超過 `REPLY_SLA_MINUTES` 未回覆就標記「逾時」並推播
-- **互動訊息**：客服台可直接編輯 LINE 訊息 JSON（Flex、Buttons、Confirm、Carousel、Quick reply、datetimepicker…）並即時預覽後送出；範例在 `src/presets.ts`。所有 postback 按鈕送出時會自動加上追蹤 id，使用者點選後以 postback 回到 webhook，結果寫入 D1 的 `prompts` 與 `prompt_responses`，客服台即時顯示並可匯出 CSV
+- **互動訊息編輯台**：不用懂 JSON，用表單組合「文字／是否確認／按鈕卡／輪播卡／資訊卡（Flex）」與快速回覆小圓鈕，每個欄位都內建 LINE 的字數與數量上限，送出前自動檢查；範本在 `src/builder/presets.ts`。進階使用者可切到 JSON 模式直接改（範例在 `src/presets.ts`）。所有 postback 按鈕送出時會自動加上追蹤 id，使用者點選後以 postback 回到 webhook，結果寫入 D1 的 `prompts` 與 `prompt_responses`，客服台即時顯示並可匯出 CSV
 - **自動歡迎**：使用者加好友時用 reply token 送 `WELCOME_MESSAGE`
 - **群組／多人聊天室**：以群組為對話單位，訊息會標示發言者
 

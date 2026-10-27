@@ -6,6 +6,9 @@ import { LinePreview } from "./LinePreview";
 interface Props {
 	onClose: () => void;
 	onSend: (input: SendMessagesInput) => Promise<void>;
+	/** 從編輯台切過來時帶入的訊息 */
+	initialMessages?: unknown[];
+	onBackToBuilder?: () => void;
 }
 
 const DRAFT_KEY = "cs-console-compose-draft";
@@ -27,11 +30,13 @@ function saveDraft(key: string, text: string) {
 	}
 }
 
-export function ComposeDialog({ onClose, onSend }: Props) {
+export function ComposeDialog({ onClose, onSend, initialMessages, onBackToBuilder }: Props) {
 	const draft = useMemo(loadDraft, []);
-	const [presetKey, setPresetKey] = useState(draft?.key ?? MESSAGE_PRESETS[0].key);
+	const [presetKey, setPresetKey] = useState(initialMessages ? "custom" : (draft?.key ?? MESSAGE_PRESETS[0].key));
 	const [text, setText] = useState(
-		draft?.text ?? JSON.stringify(MESSAGE_PRESETS[0].messages, null, 2),
+		initialMessages
+			? JSON.stringify(initialMessages, null, 2)
+			: (draft?.text ?? JSON.stringify(MESSAGE_PRESETS[0].messages, null, 2)),
 	);
 	const [sending, setSending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -96,8 +101,14 @@ export function ComposeDialog({ onClose, onSend }: Props) {
 				onClick={(e) => e.stopPropagation()}
 			>
 				<div className="flex items-center gap-3 px-5 py-3 border-b border-neutral-200 dark:border-neutral-800">
-					<h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">發送互動訊息</h2>
+					<h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">互動訊息（JSON 模式）</h2>
+					{onBackToBuilder && (
+						<button onClick={onBackToBuilder} className="text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 hover:underline underline-offset-2">
+							← 回編輯台
+						</button>
+					)}
 					<select value={presetKey} onChange={(e) => pickPreset(e.target.value)} className={`${field} w-auto py-1.5`}>
+						{presetKey === "custom" && <option value="custom">（來自編輯台）</option>}
 						{MESSAGE_PRESETS.map((p) => (
 							<option key={p.key} value={p.key}>
 								{p.name}

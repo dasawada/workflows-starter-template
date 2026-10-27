@@ -14,6 +14,7 @@ import { Login } from "./components/Login";
 import { ConversationList } from "./components/ConversationList";
 import { MessageThread } from "./components/MessageThread";
 import { ComposeDialog } from "./components/ComposeDialog";
+import { BuilderDialog } from "./components/builder/BuilderDialog";
 import { PromptsPanel } from "./components/PromptsPanel";
 
 const PAGE_SIZE = 50;
@@ -34,7 +35,8 @@ function App() {
 	const [messagesLoading, setMessagesLoading] = useState(false);
 	const [hasMore, setHasMore] = useState(false);
 
-	const [promptDialogOpen, setPromptDialogOpen] = useState(false);
+	const [composeMode, setComposeMode] = useState<"closed" | "builder" | "json">("closed");
+	const [jsonSeed, setJsonSeed] = useState<unknown[] | undefined>(undefined);
 	const [promptsPanelOpen, setPromptsPanelOpen] = useState(false);
 	const [prompts, setPrompts] = useState<Prompt[]>([]);
 	const [promptsLoading, setPromptsLoading] = useState(false);
@@ -330,7 +332,7 @@ function App() {
 							hasMore={hasMore}
 							onLoadMore={() => void loadMore()}
 							onSend={handleSend}
-							onOpenPrompt={() => setPromptDialogOpen(true)}
+							onOpenPrompt={() => setComposeMode("builder")}
 							onToggleStatus={() => void handleToggleStatus()}
 							onBack={() => setSelectedId(null)}
 						/>
@@ -342,8 +344,23 @@ function App() {
 				</main>
 			</div>
 
-			{promptDialogOpen && selected && (
-				<ComposeDialog onClose={() => setPromptDialogOpen(false)} onSend={handleSendMessages} />
+			{composeMode === "builder" && selected && (
+				<BuilderDialog
+					onClose={() => setComposeMode("closed")}
+					onSend={handleSendMessages}
+					onSwitchToJson={(messages) => {
+						setJsonSeed(messages);
+						setComposeMode("json");
+					}}
+				/>
+			)}
+			{composeMode === "json" && selected && (
+				<ComposeDialog
+					onClose={() => setComposeMode("closed")}
+					onSend={handleSendMessages}
+					initialMessages={jsonSeed}
+					onBackToBuilder={() => setComposeMode("builder")}
+				/>
 			)}
 		</div>
 	);
