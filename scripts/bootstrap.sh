@@ -17,8 +17,10 @@ json_field() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
 echo "== D1: $DB_NAME"
 DB_ID=$(npx wrangler d1 list --json | json_field uuid "$DB_NAME")
 if [ -z "$DB_ID" ]; then
-  DB_ID=$(npx wrangler d1 create "$DB_NAME" --json | json_field uuid) || {
+  npx wrangler d1 create "$DB_NAME" || {
     echo "!! 無法建立 D1，請在 dashboard（Storage & Databases → D1）手動建立名為 $DB_NAME 的資料庫後重試"; exit 1; }
+  DB_ID=$(npx wrangler d1 list --json | json_field uuid "$DB_NAME")
+  [ -n "$DB_ID" ] || { echo "!! 建立後仍查不到 $DB_NAME 的 id"; exit 1; }
   echo "   已建立 $DB_ID"
 else
   echo "   已存在 $DB_ID"
