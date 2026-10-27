@@ -140,6 +140,8 @@ export interface SendGuard {
 
 export interface ReplyInput extends SendGuard {
 	text: string;
+	/** 引用某則訊息（本地 message id）；伺服器取出它的 quoteToken 帶給 LINE，使用者端會顯示引用框 */
+	quoteMessageId?: string;
 }
 
 /** 直接送 LINE 訊息陣列（Flex / template / quick reply…）；postback 按鈕會自動加上追蹤 id */

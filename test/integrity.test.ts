@@ -204,6 +204,29 @@ describe("quoting console-sent messages", () => {
 	});
 });
 
+describe("quoting the user's message from the console", () => {
+	it("sends quoteToken to LINE and keeps a quote snapshot on the outbound message", async () => {
+		mockLine("GET", "/v2/bot/profile/U-q2", lineJson({ displayName: "Quoted" }));
+		await postWebhook([{ ...textEvent("U-q2", "要寄到新竹", "m-q2-1"), message: { id: "m-q2-1", type: "text", text: "要寄到新竹", quoteToken: "qt-user-1" } }]);
+		const [userMsg] = await messagesOf("line:U-q2");
+
+		let pushed: { messages: { type: string; text: string; quoteToken?: string }[] } | null = null;
+		mockLine("POST", "/v2/bot/message/push", async (req) => {
+			pushed = (await req.json()) as typeof pushed;
+			return Response.json({ sentMessages: [{ id: "L-q2", quoteToken: "qt-out" }] });
+		});
+		const res = await reply("line:U-q2", { text: "收到，新竹", quoteMessageId: userMsg.id }, asAgent("小美"));
+		expect(res.status).toBe(200);
+		expect(pushed!.messages[0]).toEqual({ type: "text", text: "收到，新竹", quoteToken: "qt-user-1" });
+		const { message } = (await res.json()) as { message: Message };
+		expect(message.metadata?.quote).toMatchObject({ messageId: userMsg.id, text: "要寄到新竹", sender: "user" });
+
+		// 沒有 quoteToken 的訊息（例如舊資料）不能引用，要講清楚
+		const bad = await reply("line:U-q2", { text: "x", quoteMessageId: message.id.replace(/./, "0") }, asAgent("小美"));
+		expect(bad.status).toBe(400);
+	});
+});
+
 describe("multi-agent: assignment, presence and conflicts", () => {
 	it("blocks another agent while assigned, unless forced, and logs the hand-over", async () => {
 		await seedUser("U-ma1", "Shared");

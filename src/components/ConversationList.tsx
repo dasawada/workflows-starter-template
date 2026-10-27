@@ -86,6 +86,7 @@ export function ConversationList({
 		<div className="flex flex-col h-full">
 			<div className="p-2 space-y-2 border-b border-neutral-200 dark:border-neutral-800">
 				<input
+					id="conversation-search"
 					type="search"
 					value={draft}
 					onChange={(e) => setDraft(e.target.value)}

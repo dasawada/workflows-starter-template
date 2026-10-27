@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { Message, MessageQuote } from "../../shared/types";
 import { api } from "../api";
 import { formatBytes, formatTime } from "../format";
@@ -10,9 +10,16 @@ interface Props {
 	onRetry?: (messageId: string) => void;
 	/** 客服覺得這則有問題：按驚嘆號回報，不必說明原因 */
 	onReport?: (messageId: string, note?: string) => Promise<void>;
+	/** 引用這則訊息回覆（需要 LINE 給的 quoteToken） */
+	onQuote?: (message: Message) => void;
 }
 
-export function MessageBubble({ message, onRetry, onReport }: Props) {
+/** LINE 有給 quoteToken 且未撤回的訊息才能被引用 */
+export function canQuote(message: Message): boolean {
+	return typeof message.metadata?.quoteToken === "string" && !message.unsentAt && message.sender !== "system";
+}
+
+export function MessageBubble({ message, onRetry, onReport, onQuote }: Props) {
 	if (message.sender === "system") {
 		return (
 			<div className="flex justify-center my-2">
@@ -31,7 +38,12 @@ export function MessageBubble({ message, onRetry, onReport }: Props) {
 	const imageSet = message.metadata?.imageSet as { index: number; total: number } | undefined;
 	const imported = message.source === "manager_csv";
 	const reported = typeof message.metadata?.reportedAt === "number";
-	const report = onReport ? <ReportButton messageId={message.id} reported={reported} onReport={onReport} /> : null;
+	const report = (
+		<BubbleActions>
+			{onQuote && canQuote(message) && <QuoteButton onClick={() => onQuote(message)} />}
+			{onReport && <ReportButton messageId={message.id} reported={reported} onReport={onReport} />}
+		</BubbleActions>
+	);
 
 	// 結構固定：客服訊息靠右（驚嘆號在左側）、使用者訊息靠左（驚嘆號在右側）。不用 flex-row-reverse，避免對齊方向被反轉。
 	return (
@@ -81,9 +93,11 @@ export function MessageBubble({ message, onRetry, onReport }: Props) {
 export function ImageSetBubble({
 	messages,
 	onReport,
+	onQuote,
 }: {
 	messages: Message[];
 	onReport?: (messageId: string, note?: string) => Promise<void>;
+	onQuote?: (message: Message) => void;
 }) {
 	const sorted = [...messages].sort(
 		(a, b) => Number((a.metadata?.imageSet as { index: number })?.index ?? 0) - Number((b.metadata?.imageSet as { index: number })?.index ?? 0),
@@ -118,8 +132,30 @@ export function ImageSetBubble({
 					{formatTime(first.createdAt)} · {sorted.length < total ? `${sorted.length}/${total} 張` : `${total} 張圖片`}
 				</span>
 			</div>
-			{onReport && <ReportButton messageId={first.id} reported={reported} onReport={onReport} />}
+			<BubbleActions>
+				{onQuote && canQuote(first) && <QuoteButton onClick={() => onQuote(first)} />}
+				{onReport && <ReportButton messageId={first.id} reported={reported} onReport={onReport} />}
+			</BubbleActions>
 		</div>
+	);
+}
+
+/** 泡泡旁的次要動作：有滑鼠時滑過才出現，觸控裝置一律顯示（CSS 以 hover 能力判斷） */
+function BubbleActions({ children }: { children: ReactNode }) {
+	return <span className="shrink-0 mb-4 flex items-center gap-1 bubble-actions">{children}</span>;
+}
+
+function QuoteButton({ onClick }: { onClick: () => void }) {
+	return (
+		<button
+			type="button"
+			onClick={onClick}
+			title="引用這則訊息回覆，對方在 LINE 會看到引用框"
+			aria-label="引用此訊息"
+			className="h-6 px-1.5 rounded-full text-[11px] leading-none bg-neutral-200 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-300 hover:bg-neutral-300 dark:hover:bg-neutral-600"
+		>
+			引用
+		</button>
 	);
 }
 
@@ -139,7 +175,7 @@ function ReportButton({
 	const [busy, setBusy] = useState(false);
 	if (reported) {
 		return (
-			<span className="shrink-0 mb-4 text-[10px] text-amber-600 dark:text-amber-400" title="已回報，工程端會處理">
+			<span className="text-[10px] text-amber-600 dark:text-amber-400" title="已回報，工程端會處理">
 				已回報
 			</span>
 		);
@@ -158,7 +194,7 @@ function ReportButton({
 			}}
 			title="這則訊息有問題？按一下回報"
 			aria-label="回報此訊息"
-			className="shrink-0 mb-4 w-6 h-6 rounded-full text-xs font-semibold leading-none opacity-0 group-hover:opacity-100 focus-visible:opacity-100 bg-neutral-200 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-300 hover:bg-amber-500 hover:text-white disabled:opacity-50 transition-opacity"
+			className="w-6 h-6 rounded-full text-xs font-semibold leading-none bg-neutral-200 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-300 hover:bg-amber-500 hover:text-white disabled:opacity-50"
 		>
 			!
 		</button>

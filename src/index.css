@@ -31,3 +31,15 @@
 @utility shadow-float {
 	@apply shadow-lg shadow-black/5 dark:shadow-black/20;
 }
+
+/* 泡泡旁的次要動作：有滑鼠（可 hover）才在滑過時出現；觸控裝置一律顯示 */
+@media (hover: hover) and (pointer: fine) {
+	.bubble-actions {
+		opacity: 0;
+		transition: opacity 120ms;
+	}
+	.group:hover .bubble-actions,
+	.bubble-actions:focus-within {
+		opacity: 1;
+	}
+}

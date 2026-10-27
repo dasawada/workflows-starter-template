@@ -85,6 +85,8 @@ function App() {
 	const [notificationKey, setNotificationKey] = useState(0);
 	/** 目前對話的在看客服 */
 	const [viewers, setViewers] = useState<string[]>([]);
+	/** 正在引用的訊息 */
+	const [quoting, setQuoting] = useState<Message | null>(null);
 	const [prompts, setPrompts] = useState<Prompt[]>([]);
 	const [promptsLoading, setPromptsLoading] = useState(false);
 	const [promptsFilter, setPromptsFilter] = useState<PromptStatus | "all">("all");
@@ -265,6 +267,7 @@ function App() {
 			.catch(() => {});
 
 		setViewers([]);
+		setQuoting(null);
 		api.presence(selectedId).then(({ agents }) => !cancelled && setViewers(agents)).catch(() => {});
 
 		return () => {
@@ -354,6 +357,37 @@ function App() {
 		setSelected(id ? (conversationsRef.current.find((c) => c.id === id) ?? null) : null);
 	}, [navigate]);
 
+	// 電腦模式的鍵盤操作：⌘K／Ctrl+K 搜尋、焦點不在輸入框時 ↑↓ 切換對話、Escape 關閉面板
+	useEffect(() => {
+		if (auth !== "authed") return;
+		const onKey = (e: KeyboardEvent) => {
+			if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+				e.preventDefault();
+				document.getElementById("conversation-search")?.focus();
+				return;
+			}
+			const target = e.target as HTMLElement | null;
+			const typing = !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable);
+			if (e.key === "Escape" && !typing && routeRef.current.panel && routeRef.current.compose === "closed") {
+				navigate({ panel: null });
+				return;
+			}
+			if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !typing && !routeRef.current.panel && routeRef.current.compose === "closed") {
+				const list = conversationsRef.current;
+				if (!list.length) return;
+				const idx = list.findIndex((c) => c.id === routeRef.current.conversationId);
+				const next = e.key === "ArrowDown" ? Math.min(list.length - 1, idx + 1) : Math.max(0, idx - 1);
+				if (next !== idx) {
+					e.preventDefault();
+					selectConversation(list[next].id);
+				}
+			}
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [auth, navigate, selectConversation]);
+
+
 	const mergeMessage = useCallback((message: Message) => {
 		setMessages((prev) => {
 			const idx = prev.findIndex((m) => m.id === message.id);
@@ -375,9 +409,11 @@ function App() {
 				force,
 				clientKey: crypto.randomUUID(),
 				lastSeenMessageId: lastSeenMessageId(),
+				quoteMessageId: quoting?.id,
 			});
 			mergeMessage(message);
 			upsertConversation(conversation);
+			setQuoting(null);
 		} catch (err) {
 			// 502：訊息已寫入但 LINE 拒絕，先放進畫面讓客服看到失敗狀態與重試
 			if (err instanceof ApiError && err.status === 502 && err.data?.message) {
@@ -487,8 +523,13 @@ function App() {
 	const totalUnread = stats?.unreadTotal ?? 0;
 
 	return (
-		<div className="h-screen flex flex-col bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100">
-			<header className="flex items-center gap-3 px-4 h-12 border-b border-neutral-200 dark:border-neutral-800 shrink-0">
+		<div className="h-dvh flex flex-col bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100">
+			{/* 手機模式：進到對話或面板後，整個畫面交給該頁（像 LINE），全站標題列只在清單出現 */}
+			<header
+				className={`items-center gap-3 px-4 h-12 border-b border-neutral-200 dark:border-neutral-800 shrink-0 ${
+					selectedId || panel ? "hidden lg:flex" : "flex"
+				}`}
+			>
 				<span className="text-sm font-semibold">客服收發台</span>
 				{totalUnread > 0 && (
 					<span className="text-[11px] px-1.5 py-0.5 rounded-full bg-emerald-600 text-white font-semibold" title="未讀訊息總數">
@@ -510,7 +551,7 @@ function App() {
 					<button
 						key={key}
 						onClick={() => setPanel(panel === key ? null : key)}
-						className={`text-xs px-2.5 py-1 rounded-md flex items-center gap-1 ${
+						className={`hidden lg:flex text-xs px-2.5 py-1 rounded-md items-center gap-1 ${
 							panel === key
 								? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
 								: "text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
@@ -605,6 +646,9 @@ function App() {
 							onRelease={() => void handleRelease()}
 							onRetryMessage={(id) => void handleRetryMessage(id)}
 							onReportMessage={handleReportMessage}
+							quoting={quoting}
+							onQuote={setQuoting}
+							onCancelQuote={() => setQuoting(null)}
 							onBack={() => selectConversation(null)}
 						/>
 					) : (
@@ -632,6 +676,33 @@ function App() {
 					initialMessages={jsonSeed}
 					onBackToBuilder={() => setComposeMode("builder")}
 				/>
+			)}
+
+			{/* 手機模式的底部分頁列：只在清單畫面出現，進到對話或面板就讓位（像 LINE） */}
+			{!selectedId && !panel && (
+				<nav className="lg:hidden shrink-0 border-t border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 pb-[env(safe-area-inset-bottom)]">
+					<ul className="grid grid-cols-4">
+						{(
+							[
+								[null, "對話"],
+								["prompts", "追蹤"],
+								["imports", "匯入"],
+								["notifications", "通知"],
+							] as [Panel, string][]
+						).map(([key, label]) => (
+							<li key={label}>
+								<button
+									onClick={() => setPanel(key)}
+									className={`w-full h-12 text-xs ${
+										panel === key ? "text-emerald-600 font-semibold" : "text-neutral-500 dark:text-neutral-400"
+									}`}
+								>
+									{label}
+								</button>
+							</li>
+						))}
+					</ul>
+				</nav>
 			)}
 		</div>
 	);

@@ -21,6 +21,9 @@ interface Props {
 	onRelease: () => void;
 	onRetryMessage: (messageId: string) => void;
 	onReportMessage: (messageId: string, note?: string) => Promise<void>;
+	quoting: Message | null;
+	onQuote: (message: Message) => void;
+	onCancelQuote: () => void;
 	onBack?: () => void;
 }
 
@@ -39,6 +42,9 @@ export function MessageThread({
 	onRelease,
 	onRetryMessage,
 	onReportMessage,
+	quoting,
+	onQuote,
+	onCancelQuote,
 	onBack,
 }: Props) {
 	const scrollRef = useRef<HTMLDivElement>(null);
@@ -96,10 +102,10 @@ export function MessageThread({
 		if (setId && imageSets.has(setId)) {
 			if (renderedSets.has(setId)) continue;
 			renderedSets.add(setId);
-			items.push(<ImageSetBubble key={`set-${setId}`} messages={imageSets.get(setId)!} onReport={onReportMessage} />);
+			items.push(<ImageSetBubble key={`set-${setId}`} messages={imageSets.get(setId)!} onReport={onReportMessage} onQuote={onQuote} />);
 			continue;
 		}
-		items.push(<MessageBubble key={m.id} message={m} onRetry={onRetryMessage} onReport={onReportMessage} />);
+		items.push(<MessageBubble key={m.id} message={m} onRetry={onRetryMessage} onReport={onReportMessage} onQuote={onQuote} />);
 	}
 
 	return (
@@ -180,7 +186,7 @@ export function MessageThread({
 				{items}
 			</div>
 
-			<Composer disabled={closed} onSend={onSend} onOpenPrompt={onOpenPrompt} />
+			<Composer disabled={closed} onSend={onSend} onOpenPrompt={onOpenPrompt} quoting={quoting} onCancelQuote={onCancelQuote} />
 		</div>
 	);
 }

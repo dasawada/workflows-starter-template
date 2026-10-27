@@ -64,6 +64,9 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 
 ## 介面設計原則（Apple Human Interface Guidelines 的精神，每個 session 都要遵守）
 
+驗收以 `docs/acceptance.md` 為準（做什麼 → 應該看到什麼）；改介面前先讀它，改完對著它逐條確認，新行為要補進去。
+兩種模式以視窗寬度 1024px（Tailwind `lg`）切換，不以裝置判斷：電腦模式像 macOS 的「訊息」（左清單右內容、鍵盤優先、滑過才出現次要控制項），手機模式像 LINE（一次一個畫面、底部分頁列只在清單出現、進對話後全站標題列讓位、Enter 換行按鈕送出、次要控制項一律顯示）。有沒有滑鼠以 CSS `@media (hover: hover) and (pointer: fine)` 判斷（`src/index.css` 的 `.bubble-actions`）。
+
 使用者是客服人員，不是工程師；他們把這些當成基礎設施，一旦不符預期就是「壞掉」。簡單就是最好的。
 
 - **清晰（Clarity）**：每個畫面只回答「現在怎麼了」「我要做什麼」。一個狀態一句話，一個問題一個動作。不把內部狀態（queue 模式、markAsReadMode、cron、retry key）做成介面。

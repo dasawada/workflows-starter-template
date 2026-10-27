@@ -513,11 +513,27 @@ async function handleReply(request: Request, env: Env, conversation: Conversatio
 	if (conversation.channel !== "line") return Response.json({ error: `channel ${conversation.channel} not supported yet` }, { status: 400 });
 	if (!env.LINE_CHANNEL_ACCESS_TOKEN) return Response.json({ error: "LINE_CHANNEL_ACCESS_TOKEN not configured" }, { status: 500 });
 
+	// 引用：LINE 只讓文字與貼圖帶 quoteToken；token 來自使用者訊息的 webhook 或我方送出時的 sentMessages
+	let quote: Record<string, unknown> | null = null;
+	let quoteToken: string | null = null;
+	if (body.quoteMessageId) {
+		const target = await getMessage(env.DB, body.quoteMessageId);
+		if (!target || target.conversationId !== conversation.id) {
+			return Response.json({ error: "找不到要引用的訊息" }, { status: 400 });
+		}
+		quoteToken = typeof target.metadata?.quoteToken === "string" ? target.metadata.quoteToken : null;
+		if (!quoteToken || target.unsentAt) {
+			return Response.json({ error: "此訊息無法引用（LINE 未提供引用憑證，或訊息已撤回）" }, { status: 400 });
+		}
+		quote = { externalId: target.externalId, messageId: target.id, text: target.text, type: target.type, sender: target.sender };
+	}
+
 	const result = await sendOutbound(env, lineClientFor(env), {
 		conversation,
 		type: "text",
 		text,
-		payload: [{ type: "text", text }],
+		payload: [quoteToken ? { type: "text", text, quoteToken } : { type: "text", text }],
+		metadata: quote ? { quote } : null,
 		...guardOf(request, body),
 	});
 	if (result.kind === "sent" || result.kind === "pending") await finishReminder(env, conversation.id);
