@@ -1,65 +1,58 @@
 import { WorkflowEntrypoint, WorkflowStep } from "cloudflare:workers";
 import type { WorkflowEvent } from "cloudflare:workers";
+import { markNeedsAttentionIfUnanswered, setReminderInstanceId } from "./db";
+import { inboxStub } from "./inbox-do";
+
+export interface ReplyReminderParams {
+	conversationId: string;
+}
+
+export const AGENT_REPLIED_EVENT = "agent-replied";
 
 /**
- * This workflow showcases:
- * - Durable step execution with step.do
- * - Time-based delays with step.sleep
- * - Interactive pausing with step.waitForEvent
- * - Data flow between steps
- *
- * @see https://developers.cloudflare.com/workflows
+ * ReplyReminderWorkflow：使用者傳訊息後啟動，等待客服回覆。
+ * - 客服在 SLA 內回覆：Worker 會送 agent-replied 事件，流程直接結束。
+ * - 逾時：把對話標成「待處理」並推播給所有在線客服。
  */
-export class MyWorkflow extends WorkflowEntrypoint<
+export class ReplyReminderWorkflow extends WorkflowEntrypoint<
 	Env,
-	Record<string, unknown>
+	ReplyReminderParams
 > {
-	async run(event: WorkflowEvent<Record<string, unknown>>, step: WorkflowStep) {
-		const instanceId = event.instanceId;
+	async run(event: WorkflowEvent<ReplyReminderParams>, step: WorkflowStep) {
+		const { conversationId } = event.payload;
+		const minutes = Math.max(1, Number(this.env.REPLY_SLA_MINUTES) || 10);
 
-		// Notify Durable Object of step progress. Called outside step.do, so this
-		// operation may repeat. Safe here because updateStep is idempotent.
-		// Refer to: https://developers.cloudflare.com/workflows/build/rules-of-workflows/
-		const notifyStep = async (
-			stepName: string,
-			status: "running" | "completed" | "waiting",
-		) => {
-			try {
-				const doId = this.env.WORKFLOW_STATUS.idFromName(instanceId);
-				const stub = this.env.WORKFLOW_STATUS.get(doId);
-				await stub.updateStep(stepName, status);
-			} catch {
-				// Silently fail
-			}
-		};
+		let replied = false;
+		try {
+			await step.waitForEvent("wait for agent reply", {
+				type: AGENT_REPLIED_EVENT,
+				timeout: `${minutes} minutes`,
+			});
+			replied = true;
+		} catch {
+			replied = false;
+		}
 
-		// Step 1: Basic step - shows step.do usage
-		await notifyStep("process data", "running");
-		const result = await step.do("process data", async () => {
-			await new Promise((resolve) => setTimeout(resolve, 1000));
-			return { processed: true, timestamp: Date.now() };
+		if (!replied) {
+			await step.do("mark needs attention", async () => {
+				const conversation = await markNeedsAttentionIfUnanswered(
+					this.env.DB,
+					conversationId,
+				);
+				if (conversation) {
+					await inboxStub(this.env).broadcast({
+						type: "conversation.updated",
+						conversation,
+					});
+				}
+				return { flagged: conversation !== null };
+			});
+		}
+
+		await step.do("clear reminder pointer", async () => {
+			await setReminderInstanceId(this.env.DB, conversationId, null);
 		});
-		await notifyStep("process data", "completed");
 
-		// Step 2: Sleep step - shows step.sleep for delays
-		await notifyStep("wait 2 seconds", "running");
-		await step.sleep("wait 2 seconds", "2 seconds");
-		await notifyStep("wait 2 seconds", "completed");
-
-		// Step 3: Wait for event - shows interactive step.waitForEvent
-		await notifyStep("wait for approval", "waiting");
-		const approval = await step.waitForEvent("wait for approval", {
-			type: "user-approval",
-			timeout: "60 minutes",
-		});
-		await notifyStep("wait for approval", "completed");
-
-		// Step 4: Final step
-		await notifyStep("final", "running");
-		await step.do("final", async () => {
-			console.log("Results:", { result, approval: approval.payload });
-			await new Promise((resolve) => setTimeout(resolve, 1000));
-		});
-		await notifyStep("final", "completed");
+		return { conversationId, replied };
 	}
 }

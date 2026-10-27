@@ -1,52 +1,79 @@
 /**
- * For more details on how to configure Wrangler, refer to:
+ * Cloudflare Wrangler 設定
  * https://developers.cloudflare.com/workers/wrangler/configuration/
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "workflows-starter-template",
+	"name": "cs-console",
 	"main": "worker/index.ts",
 	"compatibility_date": "2025-10-08",
 	"assets": {
 		"directory": "./dist",
-		"not_found_handling": "single-page-application"
+		"not_found_handling": "single-page-application",
+		// API / webhook / ws 一律交給 Worker，其餘才回靜態頁
+		"run_worker_first": ["/api/*", "/webhook/*", "/ws"]
 	},
 	"observability": {
 		"enabled": true
 	},
 	/**
-	 * Workflows
-	 * Define Workflows to orchestrate multi-step processes
-	 * https://developers.cloudflare.com/workflows/
+	 * 非機密設定值。機密（LINE 金鑰、客服台登入 token）請勿寫在這裡：
+	 * - 本機：寫在 .dev.vars（見 .dev.vars.example）
+	 * - 正式：wrangler secret put <NAME>
 	 */
-	"workflows": [
+	"vars": {
+		// 客服多久沒回覆就標記「待處理」並推播提醒（分鐘）
+		"REPLY_SLA_MINUTES": "10",
+		// 使用者加好友時自動回覆的歡迎詞，留空則不送
+		"WELCOME_MESSAGE": "您好，感謝加入好友！請直接留言，客服人員會盡快回覆您。"
+	},
+	/**
+	 * D1：對話與訊息的永久儲存
+	 * 正式環境請先執行 `wrangler d1 create cs-console-db`，再把 database_id 貼到下方
+	 */
+	"d1_databases": [
 		{
-			"name": "my-workflow",
-			"binding": "MY_WORKFLOW",
-			"class_name": "MyWorkflow"
+			"binding": "DB",
+			"database_name": "cs-console-db",
+			"database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+			"migrations_dir": "migrations"
 		}
 	],
 	/**
-	 * Durable Objects
-	 * Used for WebSocket state management and real-time updates
-	 * https://developers.cloudflare.com/durable-objects/
+	 * R2：LINE 傳來的圖片／影片／檔案
+	 * 正式環境請先執行 `wrangler r2 bucket create cs-console-media`
+	 */
+	"r2_buckets": [
+		{
+			"binding": "MEDIA",
+			"bucket_name": "cs-console-media"
+		}
+	],
+	/**
+	 * Workflows：逾時未回覆提醒
+	 */
+	"workflows": [
+		{
+			"name": "reply-reminder",
+			"binding": "REPLY_REMINDER",
+			"class_name": "ReplyReminderWorkflow"
+		}
+	],
+	/**
+	 * Durable Object：客服台的 WebSocket 連線與即時廣播
 	 */
 	"durable_objects": {
 		"bindings": [
 			{
-				"name": "WORKFLOW_STATUS",
-				"class_name": "WorkflowStatusDO"
+				"name": "INBOX",
+				"class_name": "InboxDO"
 			}
 		]
 	},
-	/**
-	 * Migrations
-	 * Required for Durable Objects
-	 */
 	"migrations": [
 		{
 			"tag": "v1",
-			"new_sqlite_classes": ["WorkflowStatusDO"]
+			"new_sqlite_classes": ["InboxDO"]
 		}
 	],
 	"upload_source_maps": true

@@ -1,0 +1,11 @@
+# 複製成 .dev.vars（已在 .gitignore 內，不會被 commit）
+# 正式環境請改用：wrangler secret put <NAME>
+
+# LINE Developers Console → 你的 Messaging API channel → Basic settings → Channel secret
+LINE_CHANNEL_SECRET=
+
+# LINE Developers Console → Messaging API → Channel access token (long-lived)
+LINE_CHANNEL_ACCESS_TOKEN=
+
+# 客服台登入用的共用密碼，自己隨意設一串夠長的亂數
+CONSOLE_TOKEN=

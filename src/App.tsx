@@ -1,121 +1,284 @@
-import { useState, useEffect } from "react";
-import { WorkflowDiagram } from "./components/WorkflowDiagram";
-import { CodeDisplay } from "./components/CodeDisplay";
-import { BackgroundDots } from "./components/BackgroundDots";
-import { useWorkflowWebSocket } from "./hooks/useWorkflowWebSocket";
-import { WORKFLOW_STEPS } from "./types";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type {
+	Conversation,
+	ConversationStatus,
+	InboxEvent,
+	Message,
+} from "../shared/types";
+import { api, ApiError, getToken, setToken } from "./api";
+import { useInboxSocket } from "./hooks/useInboxSocket";
+import { Login } from "./components/Login";
+import { ConversationList } from "./components/ConversationList";
+import { MessageThread } from "./components/MessageThread";
+
+const PAGE_SIZE = 50;
+
+type AuthState = "checking" | "anonymous" | "authed";
 
 function App() {
-	const [instanceId, setInstanceId] = useState<string | null>(null);
-	const [isStarting, setIsStarting] = useState(false);
-	const workflowState = useWorkflowWebSocket(instanceId);
+	const [auth, setAuth] = useState<AuthState>(getToken() ? "checking" : "anonymous");
+	const [loginError, setLoginError] = useState<string | null>(null);
+	const [loginBusy, setLoginBusy] = useState(false);
 
+	const [filter, setFilter] = useState<ConversationStatus | "all">("open");
+	const [conversations, setConversations] = useState<Conversation[]>([]);
+	const [listLoading, setListLoading] = useState(false);
+
+	const [selectedId, setSelectedId] = useState<string | null>(null);
+	const [messages, setMessages] = useState<Message[]>([]);
+	const [messagesLoading, setMessagesLoading] = useState(false);
+	const [hasMore, setHasMore] = useState(false);
+
+	// ---------- 驗證 ----------
 	useEffect(() => {
-		if (workflowState.workflowStatus === "completed") {
-			const timer = setTimeout(() => {
-				setInstanceId(null);
-			}, 1500);
-			return () => clearTimeout(timer);
-		}
-	}, [workflowState.workflowStatus]);
-
-	useEffect(() => {
-		if (
-			workflowState.workflowStatus === "running" &&
-			workflowState.currentStep
-		) {
-			setIsStarting(false);
-		}
-	}, [workflowState.workflowStatus, workflowState.currentStep]);
-
-	const handleStartWorkflow = async () => {
-		setIsStarting(true);
-
-		try {
-			const response = await fetch("/api/workflow/start", {
-				method: "POST",
+		if (auth !== "checking") return;
+		api
+			.me()
+			.then(() => setAuth("authed"))
+			.catch(() => {
+				setToken(null);
+				setAuth("anonymous");
 			});
+	}, [auth]);
 
-			if (!response.ok) {
-				throw new Error("Failed to start workflow");
-			}
-
-			const data = await response.json();
-			setInstanceId(data.instanceId);
-		} catch {
-			alert("Failed to start workflow. Please try again.");
-			setIsStarting(false);
+	const handleLogin = async (token: string) => {
+		setLoginBusy(true);
+		setLoginError(null);
+		setToken(token);
+		try {
+			await api.me();
+			setAuth("authed");
+		} catch (err) {
+			setToken(null);
+			setLoginError(
+				err instanceof ApiError && err.status === 401 ? "密鑰不正確" : "無法連線到伺服器",
+			);
+		} finally {
+			setLoginBusy(false);
 		}
 	};
 
-	return (
-		<div className="min-h-screen bg-neutral-50/30 dark:bg-neutral-950 flex flex-col relative">
-			{/* Background dots across entire page */}
-			<div className="absolute inset-0 text-neutral-200/50 dark:text-neutral-700/40 overflow-hidden">
-				<BackgroundDots />
+	const handleLogout = () => {
+		setToken(null);
+		setAuth("anonymous");
+		setConversations([]);
+		setSelectedId(null);
+		setMessages([]);
+	};
+
+	// ---------- 對話清單 ----------
+	const loadConversations = useCallback(async () => {
+		setListLoading(true);
+		try {
+			const { conversations } = await api.listConversations(filter);
+			setConversations(conversations);
+		} catch (err) {
+			if (err instanceof ApiError && err.status === 401) handleLogout();
+		} finally {
+			setListLoading(false);
+		}
+	}, [filter]);
+
+	useEffect(() => {
+		if (auth === "authed") void loadConversations();
+	}, [auth, loadConversations]);
+
+	const upsertConversation = useCallback(
+		(conversation: Conversation) => {
+			setConversations((prev) => {
+				const matchesFilter = filter === "all" || conversation.status === filter;
+				const rest = prev.filter((c) => c.id !== conversation.id);
+				if (!matchesFilter) return rest;
+				return [conversation, ...rest].sort(
+					(a, b) => (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0),
+				);
+			});
+		},
+		[filter],
+	);
+
+	// ---------- 訊息 ----------
+	useEffect(() => {
+		if (!selectedId) {
+			setMessages([]);
+			setHasMore(false);
+			return;
+		}
+		let cancelled = false;
+		setMessagesLoading(true);
+		setMessages([]);
+		api
+			.listMessages(selectedId)
+			.then(({ messages }) => {
+				if (cancelled) return;
+				setMessages(messages);
+				setHasMore(messages.length >= PAGE_SIZE);
+			})
+			.catch(() => {})
+			.finally(() => !cancelled && setMessagesLoading(false));
+
+		api
+			.markRead(selectedId)
+			.then(({ conversation }) => conversation && upsertConversation(conversation))
+			.catch(() => {});
+
+		return () => {
+			cancelled = true;
+		};
+	}, [selectedId, upsertConversation]);
+
+	const loadMore = async () => {
+		if (!selectedId || messages.length === 0) return;
+		setMessagesLoading(true);
+		try {
+			const { messages: older } = await api.listMessages(
+				selectedId,
+				messages[0].createdAt,
+			);
+			setMessages((prev) => [...older, ...prev]);
+			setHasMore(older.length >= PAGE_SIZE);
+		} finally {
+			setMessagesLoading(false);
+		}
+	};
+
+	// ---------- 即時事件 ----------
+	const onEvent = useCallback(
+		(event: InboxEvent) => {
+			if (event.type === "message.new") {
+				const isCurrent = event.conversation.id === selectedId;
+				if (isCurrent) {
+					setMessages((prev) => {
+						const idx = prev.findIndex((m) => m.id === event.message.id);
+						if (idx >= 0) {
+							const next = prev.slice();
+							next[idx] = event.message;
+							return next;
+						}
+						return [...prev, event.message];
+					});
+					// 正在看這個對話，立即清除未讀
+					if (event.message.direction === "inbound" && event.conversation.unreadCount > 0) {
+						api.markRead(event.conversation.id).catch(() => {});
+						upsertConversation({ ...event.conversation, unreadCount: 0 });
+						return;
+					}
+				}
+				upsertConversation(event.conversation);
+			} else if (event.type === "conversation.updated") {
+				upsertConversation(event.conversation);
+			}
+		},
+		[selectedId, upsertConversation],
+	);
+
+	const { connected } = useInboxSocket(auth === "authed", onEvent);
+
+	// 重連後重新抓一次清單，補上斷線期間漏掉的更新
+	useEffect(() => {
+		if (connected && auth === "authed") void loadConversations();
+	}, [connected, auth, loadConversations]);
+
+	// ---------- 操作 ----------
+	const selected = useMemo(
+		() => conversations.find((c) => c.id === selectedId) ?? null,
+		[conversations, selectedId],
+	);
+
+	const handleSend = async (text: string) => {
+		if (!selectedId) return;
+		const { message, conversation } = await api.reply(selectedId, text);
+		setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
+		upsertConversation(conversation);
+	};
+
+	const handleToggleStatus = async () => {
+		if (!selected) return;
+		const next: ConversationStatus = selected.status === "open" ? "closed" : "open";
+		const { conversation } = await api.setStatus(selected.id, next);
+		upsertConversation(conversation);
+		if (filter !== "all" && conversation.status !== filter) setSelectedId(null);
+	};
+
+	// ---------- 畫面 ----------
+	if (auth === "checking") {
+		return (
+			<div className="min-h-screen flex items-center justify-center text-sm text-neutral-500 dark:bg-neutral-950">
+				載入中…
 			</div>
+		);
+	}
+	if (auth === "anonymous") {
+		return <Login error={loginError} busy={loginBusy} onSubmit={handleLogin} />;
+	}
 
-			{/* Minimal Integrated Header */}
-			<header className="px-6 pt-6 pb-4 relative z-10">
-				<div className="flex items-center justify-between">
-					<div className="flex items-center gap-3">
-						<svg
-							role="img"
-							viewBox="0 0 460 271.2"
-							aria-hidden="true"
-							className="h-5 w-auto opacity-90"
-						>
-							<path
-								fill="#FBAD41"
-								d="M328.6,125.6c-0.8,0-1.5,0.6-1.8,1.4l-4.8,16.7c-2.1,7.2-1.3,13.8,2.2,18.7c3.2,4.5,8.6,7.1,15.1,7.4l26.2,1.6c0.8,0,1.5,0.4,1.9,1c0.4,0.6,0.5,1.5,0.3,2.2c-0.4,1.2-1.6,2.1-2.9,2.2l-27.3,1.6c-14.8,0.7-30.7,12.6-36.3,27.2l-2,5.1c-0.4,1,0.3,2,1.4,2h93.8c1.1,0,2.1-0.7,2.4-1.8c1.6-5.8,2.5-11.9,2.5-18.2c0-37-30.2-67.2-67.3-67.2C330.9,125.5,329.7,125.5,328.6,125.6z"
-							/>
-							<path
-								fill="#F6821F"
-								d="M292.8,204.4c2.1-7.2,1.3-13.8-2.2-18.7c-3.2-4.5-8.6-7.1-15.1-7.4l-123.1-1.6c-0.8,0-1.5-0.4-1.9-1s-0.5-1.4-0.3-2.2c0.4-1.2,1.6-2.1,2.9-2.2l124.2-1.6c14.7-0.7,30.7-12.6,36.3-27.2l7.1-18.5c0.3-0.8,0.4-1.6,0.2-2.4c-8-36.2-40.3-63.2-78.9-63.2c-35.6,0-65.8,23-76.6,54.9c-7-5.2-15.9-8-25.5-7.1c-17.1,1.7-30.8,15.4-32.5,32.5c-0.4,4.4-0.1,8.7,0.9,12.7c-27.9,0.8-50.2,23.6-50.2,51.7c0,2.5,0.2,5,0.5,7.5c0.2,1.2,1.2,2.1,2.4,2.1h227.2c1.3,0,2.5-0.9,2.9-2.2L292.8,204.4z"
-							/>
-						</svg>
-						<div className="w-px h-4 bg-neutral-300/50 dark:bg-neutral-600/50" />
-						<h1 className="text-sm font-medium text-neutral-600 dark:text-neutral-400">
-							Workflows Starter Template
-						</h1>
-					</div>
+	const totalUnread = conversations.reduce((n, c) => n + c.unreadCount, 0);
 
-					<a
-						href="https://developers.cloudflare.com/workflows"
-						target="_blank"
-						rel="noopener noreferrer"
-						className="text-xs font-medium text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 transition-colors"
-					>
-						Documentation →
-					</a>
-				</div>
+	return (
+		<div className="h-screen flex flex-col bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100">
+			<header className="flex items-center gap-3 px-4 h-12 border-b border-neutral-200 dark:border-neutral-800 shrink-0">
+				<span className="text-sm font-semibold">客服收發台</span>
+				{totalUnread > 0 && (
+					<span className="text-[11px] px-1.5 py-0.5 rounded-full bg-emerald-600 text-white font-semibold">
+						{totalUnread}
+					</span>
+				)}
+				<span
+					className={`ml-auto flex items-center gap-1.5 text-[11px] ${
+						connected ? "text-emerald-600" : "text-amber-600"
+					}`}
+				>
+					<span
+						className={`w-2 h-2 rounded-full ${connected ? "bg-emerald-500" : "bg-amber-500 animate-pulse"}`}
+					/>
+					{connected ? "即時連線中" : "重新連線中…"}
+				</span>
+				<button
+					onClick={handleLogout}
+					className="text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
+				>
+					登出
+				</button>
 			</header>
 
-			{/* Main content - unified canvas */}
-			<main className="flex-1 flex flex-col lg:flex-row overflow-hidden relative z-10">
-				{/* Left side - Code (responsive width) */}
-				<div className="w-full lg:w-[60%] overflow-hidden px-6 pb-6">
-					<CodeDisplay
-						currentStep={workflowState.currentStep}
-						workflowStatus={workflowState.workflowStatus}
-						onStartWorkflow={handleStartWorkflow}
-						isStarting={isStarting}
+			<div className="flex-1 flex min-h-0">
+				<aside
+					className={`w-full lg:w-80 xl:w-96 border-r border-neutral-200 dark:border-neutral-800 shrink-0 ${
+						selectedId ? "hidden lg:block" : "block"
+					}`}
+				>
+					<ConversationList
+						conversations={conversations}
+						selectedId={selectedId}
+						filter={filter}
+						loading={listLoading}
+						onSelect={setSelectedId}
+						onFilterChange={(f) => {
+							setFilter(f);
+							setSelectedId(null);
+						}}
 					/>
-				</div>
+				</aside>
 
-				{/* Right side - Diagram (responsive width) */}
-				<div className="flex-1 overflow-hidden px-6 lg:pl-8 lg:pr-6 pb-6">
-					<WorkflowDiagram
-						steps={WORKFLOW_STEPS}
-						stepStatuses={workflowState.stepStatuses}
-						currentStep={workflowState.currentStep}
-						instanceId={instanceId}
-						workflowStatus={workflowState.workflowStatus}
-						onStartWorkflow={handleStartWorkflow}
-						isStarting={isStarting}
-					/>
-				</div>
-			</main>
+				<main className={`flex-1 min-w-0 ${selectedId ? "block" : "hidden lg:block"}`}>
+					{selected ? (
+						<MessageThread
+							conversation={selected}
+							messages={messages}
+							loading={messagesLoading}
+							hasMore={hasMore}
+							onLoadMore={() => void loadMore()}
+							onSend={handleSend}
+							onToggleStatus={() => void handleToggleStatus()}
+							onBack={() => setSelectedId(null)}
+						/>
+					) : (
+						<div className="h-full flex items-center justify-center text-sm text-neutral-400">
+							從左側選擇一個對話
+						</div>
+					)}
+				</main>
+			</div>
 		</div>
 	);
 }

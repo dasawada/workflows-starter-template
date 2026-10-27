@@ -1,6 +1,6 @@
 {
-	"name": "workflows-starter-template",
-	"description": "Interactive starter template demonstrating Cloudflare Workflows with real-time status updates",
+	"name": "cs-console",
+	"description": "LINE 客服訊息收發台（Cloudflare Workers + D1 + R2 + Durable Objects + Workflows）",
 	"cloudflare": {
 		"label": "Workflows Starter",
 		"products": [
@@ -48,6 +48,8 @@
 		"check": "tsc && wrangler deploy --dry-run",
 		"deploy": "npm run build && wrangler deploy",
 		"dev": "vite",
+		"db:migrate:local": "wrangler d1 migrations apply DB --local",
+		"db:migrate": "wrangler d1 migrations apply DB --remote",
 		"lint": "eslint .",
 		"preview": "npm run build && vite preview",
 		"test": "vitest run"
