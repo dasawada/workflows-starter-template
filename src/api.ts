@@ -8,11 +8,6 @@ import type {
 	ImportPreview,
 	ImportRowGroup,
 	ImportRunInput,
-	IntegrityEvent,
-	IntegrityHealth,
-	IntegrityKind,
-	IntegrityReportInput,
-	IntegrityStatus,
 	LineBotInfo,
 	Message,
 	MessageListResponse,
@@ -116,27 +111,12 @@ export const api = {
 	release: (conversationId: string) =>
 		request<{ conversation: Conversation }>(`${conv(conversationId)}/release`, { method: "POST", body: "{}" }),
 	presence: (conversationId: string) => request<{ agents: string[] }>(`${conv(conversationId)}/presence`),
-	conversationIntegrity: (conversationId: string) =>
-		request<{ events: IntegrityEvent[] }>(`${conv(conversationId)}/integrity?status=open`),
-	reportGap: (input: IntegrityReportInput) =>
-		request<{ events: IntegrityEvent[] }>(`${conv(input.conversationId)}/report`, {
+	/** 客服對某則訊息按驚嘆號；上下文由伺服器收齊，工程端用 npm run reports 讀 */
+	reportMessage: (messageId: string, note?: string) =>
+		request<{ message: Message }>(`/api/messages/${encodeURIComponent(messageId)}/report`, {
 			method: "POST",
-			body: JSON.stringify({ note: input.note, from: input.from, to: input.to }),
+			body: JSON.stringify({ note }),
 		}),
-
-	// ---------- 完整性中心 ----------
-	integrityHealth: () => request<IntegrityHealth>("/api/integrity/health"),
-	integrityEvents: (status: IntegrityStatus | "all" = "open", kind?: IntegrityKind) =>
-		request<{ events: IntegrityEvent[] }>(
-			`/api/integrity/events?status=${status}${kind ? `&kind=${kind}` : ""}&limit=200`,
-		),
-	resolveIntegrityEvent: (id: string, resolution: string) =>
-		request<{ event: IntegrityEvent }>(`/api/integrity/events/${encodeURIComponent(id)}/resolve`, {
-			method: "POST",
-			body: JSON.stringify({ resolution }),
-		}),
-	runMaintenance: () =>
-		request<{ outbound: number; media: number; botInfo: boolean }>("/api/integrity/maintenance", { method: "POST" }),
 	lineInfo: () => request<LineBotInfo>("/api/line/info"),
 
 	// ---------- 歷史匯入 ----------

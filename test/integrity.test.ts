@@ -318,15 +318,24 @@ describe("integrity center", () => {
 		const [redelivery] = await openEvents("webhook_redelivery");
 		expect(redelivery.details?.count).toBe(2);
 
-		const report = await SELF.fetch("https://console.test/api/conversations/line%3AU-health/report", {
+		const [first] = await messagesOf("line:U-health");
+		const report = await SELF.fetch(`https://console.test/api/messages/${first.id}/report`, {
 			method: "POST",
 			headers: asAgent("小美"),
-			body: JSON.stringify({ note: "客人說早上有傳圖片，這裡沒有", from: ts - 3600000, to: ts }),
+			body: JSON.stringify({ note: "客人說早上有傳圖片，這裡沒有" }),
 		});
 		expect(report.status).toBe(200);
-		const { events } = (await report.json()) as { events: IntegrityEvent[] };
-		const mine = events.find((e) => e.kind === "agent_report")!;
+		expect(((await report.json()) as { message: Message }).message.metadata?.reportedAt).toBeTypeOf("number");
+		// 再戳一次：同一筆事件計數 +1，不會多一筆
+		await SELF.fetch(`https://console.test/api/messages/${first.id}/report`, { method: "POST", headers: asAgent("小美"), body: "{}" });
+		const reports = (await openEvents("agent_report")).filter((e) => e.messageId === first.id);
+		expect(reports).toHaveLength(1);
+		const mine = reports[0];
 		expect(mine).toMatchObject({ createdBy: "小美", conversationId: "line:U-health", status: "open" });
+		expect(mine.details?.count).toBe(2);
+		const context = mine.details?.context as { target: boolean; text: string | null }[];
+		expect(context.some((c) => c.target && c.text === "一")).toBe(true);
+		expect(context.map((c) => c.text)).toEqual(["一", "二"]);
 
 		const resolve = await SELF.fetch(`https://console.test/api/integrity/events/${mine.id}/resolve`, {
 			method: "POST",

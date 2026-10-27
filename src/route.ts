@@ -2,10 +2,10 @@
  * 以瀏覽器網址保存畫面狀態，讓「上一頁」能回到前一個對話、關閉面板或對話框：
  *   /                                   清單（桌機顯示提示、手機顯示清單）
  *   /conversations/<id>                 對話
- *   /prompts | /integrity | /imports | /notifications   面板；?c=<id> 保留背後選取的對話
+ *   /prompts | /imports | /notifications   面板；?c=<id> 保留背後選取的對話
  *   #builder | #json                    互動訊息對話框
  */
-export type Panel = null | "prompts" | "integrity" | "imports" | "notifications";
+export type Panel = null | "prompts" | "imports" | "notifications";
 export type ComposeMode = "closed" | "builder" | "json";
 
 export interface Route {
@@ -14,7 +14,7 @@ export interface Route {
 	compose: ComposeMode;
 }
 
-const PANELS: Exclude<Panel, null>[] = ["prompts", "integrity", "imports", "notifications"];
+const PANELS: Exclude<Panel, null>[] = ["prompts", "imports", "notifications"];
 
 export function parseRoute(loc: { pathname: string; search: string; hash: string }): Route {
 	const segments = loc.pathname.split("/").filter(Boolean);

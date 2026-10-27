@@ -3,7 +3,6 @@ import type {
 	Conversation,
 	ConversationStatus,
 	InboxEvent,
-	IntegrityEvent,
 	Message,
 	Prompt,
 	PromptStatus,
@@ -20,7 +19,6 @@ import { MessageThread } from "./components/MessageThread";
 import { ComposeDialog } from "./components/ComposeDialog";
 import { BuilderDialog } from "./components/builder/BuilderDialog";
 import { PromptsPanel } from "./components/PromptsPanel";
-import { IntegrityPanel } from "./components/IntegrityPanel";
 import { ImportPanel } from "./components/ImportPanel";
 import { NotificationsPanel } from "./components/NotificationsPanel";
 
@@ -83,13 +81,10 @@ function App() {
 	const [jsonSeed, setJsonSeed] = useState<unknown[] | undefined>(undefined);
 	const promptsPanelOpen = panel === "prompts";
 	const setPromptsPanelOpen = (open: boolean) => setPanel(open ? "prompts" : null);
-	/** 完整性事件／通知更新時遞增，讓面板重抓 */
-	const [integrityKey, setIntegrityKey] = useState(0);
+	/** 通知更新時遞增，讓面板重抓 */
 	const [notificationKey, setNotificationKey] = useState(0);
-	const [openGaps, setOpenGaps] = useState(0);
-	/** 目前對話的在看客服與未解決缺口 */
+	/** 目前對話的在看客服 */
 	const [viewers, setViewers] = useState<string[]>([]);
-	const [gaps, setGaps] = useState<IntegrityEvent[]>([]);
 	const [prompts, setPrompts] = useState<Prompt[]>([]);
 	const [promptsLoading, setPromptsLoading] = useState(false);
 	const [promptsFilter, setPromptsFilter] = useState<PromptStatus | "all">("all");
@@ -192,7 +187,6 @@ function App() {
 
 	const refreshStats = useCallback(() => {
 		api.stats().then(setStats).catch(() => {});
-		api.integrityHealth().then((h) => setOpenGaps(h.openTotal)).catch(() => {});
 	}, []);
 
 	// 事件很多時統計只每秒更新一次
@@ -270,9 +264,7 @@ function App() {
 			})
 			.catch(() => {});
 
-		setGaps([]);
 		setViewers([]);
-		api.conversationIntegrity(selectedId).then(({ events }) => !cancelled && setGaps(events)).catch(() => {});
 		api.presence(selectedId).then(({ agents }) => !cancelled && setViewers(agents)).catch(() => {});
 
 		return () => {
@@ -332,15 +324,6 @@ function App() {
 				});
 			} else if (event.type === "presence.updated") {
 				if (event.conversationId === selectedId) setViewers(event.agents);
-			} else if (event.type === "integrity.updated") {
-				setIntegrityKey((k) => k + 1);
-				scheduleStats();
-				if (event.event.conversationId === selectedId) {
-					setGaps((prev) => {
-						const rest = prev.filter((g) => g.id !== event.event.id);
-						return event.event.status === "open" ? [event.event, ...rest] : rest;
-					});
-				}
 			} else if (event.type === "notification.updated") {
 				setNotificationKey((k) => k + 1);
 			}
@@ -454,10 +437,9 @@ function App() {
 		upsertConversation(conversation);
 	};
 
-	const handleReportGap = async (note: string) => {
-		if (!selectedId) return;
-		const { events } = await api.reportGap({ conversationId: selectedId, note });
-		setGaps(events);
+	const handleReportMessage = async (messageId: string, note?: string) => {
+		const { message } = await api.reportMessage(messageId, note);
+		mergeMessage(message);
 	};
 
 	const changeAgentName = () => {
@@ -520,12 +502,11 @@ function App() {
 				)}
 				{(
 					[
-						["prompts", "追蹤訊息", 0],
-						["integrity", "完整性中心", openGaps],
-						["imports", "歷史匯入", 0],
-						["notifications", "通知型訊息", 0],
-					] as [Panel, string, number][]
-				).map(([key, label, badge]) => (
+						["prompts", "追蹤訊息"],
+						["imports", "歷史匯入"],
+						["notifications", "通知型訊息"],
+					] as [Panel, string][]
+				).map(([key, label]) => (
 					<button
 						key={key}
 						onClick={() => setPanel(panel === key ? null : key)}
@@ -536,11 +517,6 @@ function App() {
 						}`}
 					>
 						{label}
-						{badge > 0 && (
-							<span className="text-[10px] px-1 rounded-full bg-amber-500 text-white font-semibold" title="未處理的完整性事件">
-								{badge > 99 ? "99+" : badge}
-							</span>
-						)}
 					</button>
 				))}
 				<button
@@ -603,15 +579,6 @@ function App() {
 							}}
 							onClose={() => setPromptsPanelOpen(false)}
 						/>
-					) : panel === "integrity" ? (
-						<IntegrityPanel
-							refreshKey={integrityKey}
-							onOpenConversation={(id) => {
-								setPanel(null);
-								selectConversation(id);
-							}}
-							onClose={() => setPanel(null)}
-						/>
 					) : panel === "imports" ? (
 						<ImportPanel
 							onOpenConversation={(id) => {
@@ -630,7 +597,6 @@ function App() {
 							hasMore={hasMore}
 							agentName={agentName}
 							viewers={viewers}
-							gaps={gaps}
 							onLoadMore={() => void loadMore()}
 							onSend={handleSend}
 							onOpenPrompt={() => setComposeMode("builder")}
@@ -638,8 +604,7 @@ function App() {
 							onAssign={() => void handleAssign()}
 							onRelease={() => void handleRelease()}
 							onRetryMessage={(id) => void handleRetryMessage(id)}
-							onReportGap={handleReportGap}
-							onOpenIntegrity={() => setPanel("integrity")}
+							onReportMessage={handleReportMessage}
 							onBack={() => selectConversation(null)}
 						/>
 					) : (

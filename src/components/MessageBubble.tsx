@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Message, MessageQuote } from "../../shared/types";
 import { api } from "../api";
 import { formatBytes, formatTime } from "../format";
@@ -7,9 +8,11 @@ interface Props {
 	message: Message;
 	/** 送出失敗／不明的客服訊息可重推 */
 	onRetry?: (messageId: string) => void;
+	/** 客服覺得這則有問題：按驚嘆號回報，不必說明原因 */
+	onReport?: (messageId: string, note?: string) => Promise<void>;
 }
 
-export function MessageBubble({ message, onRetry }: Props) {
+export function MessageBubble({ message, onRetry, onReport }: Props) {
 	if (message.sender === "system") {
 		return (
 			<div className="flex justify-center my-2">
@@ -27,9 +30,10 @@ export function MessageBubble({ message, onRetry }: Props) {
 	const quote = message.unsentAt ? null : (message.metadata?.quote as MessageQuote | undefined);
 	const imageSet = message.metadata?.imageSet as { index: number; total: number } | undefined;
 	const imported = message.source === "manager_csv";
+	const reported = typeof message.metadata?.reportedAt === "number";
 
 	return (
-		<div className={`flex ${mine ? "justify-end" : "justify-start"} my-1`}>
+		<div className={`group flex items-end gap-1 ${mine ? "justify-end flex-row-reverse" : "justify-start"} my-1`}>
 			<div className={`max-w-[75%] flex flex-col ${mine ? "items-end" : "items-start"}`}>
 				{!mine && senderName && (
 					<span className="text-[11px] text-neutral-500 mb-0.5 px-1">{senderName}</span>
@@ -61,7 +65,82 @@ export function MessageBubble({ message, onRetry }: Props) {
 					{mine && <DeliveryBadge message={message} onRetry={onRetry} />}
 				</span>
 			</div>
+			{onReport && <ReportButton messageId={message.id} reported={reported} onReport={onReport} />}
 		</div>
+	);
+}
+
+/**
+ * 驚嘆號：客服覺得這則訊息怪怪的就按一下。不要求填原因；要補充再打一行。
+ * 回報後泡泡旁留一個小標記，工程端每天用 npm run reports 讀取並處理。
+ */
+function ReportButton({
+	messageId,
+	reported,
+	onReport,
+}: {
+	messageId: string;
+	reported: boolean;
+	onReport: (messageId: string, note?: string) => Promise<void>;
+}) {
+	const [open, setOpen] = useState(false);
+	const [note, setNote] = useState("");
+	const [busy, setBusy] = useState(false);
+
+	const send = async (withNote: boolean) => {
+		setBusy(true);
+		try {
+			await onReport(messageId, withNote ? note.trim() || undefined : undefined);
+			setOpen(false);
+			setNote("");
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	if (reported && !open) {
+		return (
+			<span className="shrink-0 mb-4 text-[10px] text-amber-600 dark:text-amber-400" title="已回報，工程端會處理">
+				已回報
+			</span>
+		);
+	}
+	return (
+		<span className="relative shrink-0 mb-4">
+			<button
+				type="button"
+				onClick={() => setOpen((v) => !v)}
+				title="這則訊息有問題？按一下回報給系統"
+				aria-label="回報此訊息"
+				className={`w-5 h-5 rounded-full text-[11px] font-bold leading-none transition-opacity ${
+					open ? "opacity-100 bg-amber-500 text-white" : "opacity-0 group-hover:opacity-100 bg-neutral-200 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-300 hover:bg-amber-500 hover:text-white"
+				}`}
+			>
+				!
+			</button>
+			{open && (
+				<span className="absolute bottom-6 left-0 z-10 w-64 rounded-lg bg-white dark:bg-neutral-800 shadow-float ring-glass p-2 text-xs">
+					<div className="font-medium mb-1 text-neutral-900 dark:text-neutral-100">回報此訊息</div>
+					<input
+						autoFocus
+						value={note}
+						onChange={(e) => setNote(e.target.value)}
+						onKeyDown={(e) => e.key === "Enter" && void send(true)}
+						maxLength={500}
+						placeholder="說明（可留空）"
+						className="w-full rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1 outline-none focus:ring-2 focus:ring-amber-500 text-neutral-900 dark:text-neutral-100"
+					/>
+					<div className="mt-1.5 flex gap-1.5">
+						<button onClick={() => void send(true)} disabled={busy} className="px-2.5 py-1 rounded bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50">
+							回報
+						</button>
+						<button onClick={() => setOpen(false)} className="px-2.5 py-1 rounded text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700">
+							取消
+						</button>
+					</div>
+				</span>
+			)}
+		</span>
 	);
 }
 

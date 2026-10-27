@@ -22,6 +22,7 @@ import {
 	getConversation,
 	getImportBatch,
 	getMessage,
+	getMessageRetryKey,
 	getStats,
 	getReminderInstanceId,
 	insertMessage,
@@ -30,6 +31,8 @@ import {
 	listImportRowGroups,
 	listIntegrityEvents,
 	listMessages,
+	listMessagesAround,
+	markMessageReported,
 	listNotifications,
 	listPrompts,
 	markConversationRead,
@@ -47,7 +50,6 @@ import type {
 	ImportMapping,
 	ImportRunInput,
 	IntegrityKind,
-	IntegrityReportInput,
 	IntegrityStatus,
 	PromptOption,
 	PromptStatus,
@@ -70,16 +72,15 @@ import type {
  * - POST /api/conversations/:id/send        直接送 LINE 訊息陣列 { messages[] }，postback 自動追蹤
  * - POST /api/conversations/:id/assign      接手 { agent? }；/release 交還
  * - GET  /api/conversations/:id/presence    正在看這個對話的客服
- * - GET  /api/conversations/:id/integrity   這個對話的缺口紀錄
- * - POST /api/conversations/:id/report      客服回報訊息缺失 { note, from?, to? }
+ * - POST /api/messages/:id/report           客服對某則訊息按驚嘆號 { note? }；系統自動收齊上下文供工程端判讀
  * - POST /api/messages/:id/retry            重推送出失敗／不明的客服訊息
  * - GET  /api/prompts?status=&conversationId= 可追蹤訊息與回覆結果
  * - POST /api/conversations/:id/read        清除未讀（並通知 LINE 已讀）
  * - POST /api/conversations/:id/status      { status: "open" | "closed" }
  * - GET  /api/media/:key                    R2 媒體
  * - GET  /api/line/info                     官方帳號資訊（chatMode / markAsReadMode），確認已讀模式設定
- * - GET  /api/integrity/health              同步健康狀態
- * - GET  /api/integrity/events?status=&kind= 缺口紀錄；POST /api/integrity/events/:id/resolve
+ * - GET  /api/integrity/health              同步健康狀態（工程端用，客服台不顯示）
+ * - GET  /api/integrity/events?status=&kind= 缺口與回報紀錄；POST /api/integrity/events/:id/resolve（scripts/reports.mjs 用）
  * - POST /api/integrity/maintenance         立即執行排程維護
  * - POST /api/imports/preview               CSV 欄位偵測與配對預覽 { csv, mapping? }
  * - POST /api/imports                       執行匯入；GET /api/imports 歷史批次
@@ -305,6 +306,58 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 		return Response.json({ notification: result }, { status: result.status === "failed" ? 502 : 200 });
 	}
 
+	// ---------- 訊息回報：客服只要戳一下，上下文由系統收齊 ----------
+	const reportMatch = pathname.match(/^\/api\/messages\/([^/]+)\/report$/);
+	if (reportMatch && request.method === "POST") {
+		const message = await getMessage(env.DB, reportMatch[1]);
+		if (!message) return Response.json({ error: "Not found" }, { status: 404 });
+		const body = await readJson<{ note?: string }>(request);
+		const note = body.note?.trim().slice(0, 500) || null;
+		const now = Date.now();
+		const [conversation, around, related, retryKey] = await Promise.all([
+			getConversation(env.DB, message.conversationId),
+			listMessagesAround(env.DB, message),
+			listIntegrityEvents(env.DB, { conversationId: message.conversationId, status: "open", limit: 20 }),
+			message.direction === "outbound" ? getMessageRetryKey(env.DB, message.id) : Promise.resolve(null),
+		]);
+		await recordIntegrity(env, {
+			kind: "agent_report",
+			severity: "warning",
+			conversationId: message.conversationId,
+			messageId: message.id,
+			dedupeKey: `report:${message.id}`,
+			title: note ? `客服回報：${note.slice(0, 80)}` : `客服回報此訊息有異常（${message.direction === "inbound" ? "使用者" : "客服"}訊息）`,
+			details: {
+				note,
+				reportedBy: agentNameOf(request),
+				message: { ...message, retryKey },
+				conversation,
+				context: around.map((m) => ({
+					id: m.id,
+					at: new Date(m.createdAt).toISOString(),
+					who: m.sender === "user" ? (m.metadata?.senderName ?? "user") : (m.agentName ?? m.sender),
+					type: m.type,
+					text: m.text,
+					externalId: m.externalId,
+					delivery: m.deliveryStatus,
+					media: m.mediaStatus,
+					unsent: !!m.unsentAt,
+					edited: !!m.editedAt,
+					quote: m.metadata?.quote ?? null,
+					target: m.id === message.id,
+				})),
+				relatedOpenEvents: related.map((e) => ({ id: e.id, kind: e.kind, title: e.title, createdAt: e.createdAt })),
+			},
+			startedAt: message.createdAt,
+			createdBy: agentNameOf(request),
+		});
+		const updated = await markMessageReported(env.DB, message.id, now);
+		if (updated && conversation) {
+			await inboxStub(env).broadcast({ type: "message.new", message: updated, conversation });
+		}
+		return Response.json({ message: updated ?? message });
+	}
+
 	// ---------- 客服訊息重推 ----------
 	const retryMatch = pathname.match(/^\/api\/messages\/([^/]+)\/retry$/);
 	if (retryMatch && request.method === "POST") {
@@ -318,7 +371,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 	}
 
 	const convMatch = pathname.match(
-		/^\/api\/conversations\/([^/]+)\/(messages|reply|read|status|prompt|send|assign|release|presence|integrity|report)$/,
+		/^\/api\/conversations\/([^/]+)\/(messages|reply|read|status|prompt|send|assign|release|presence)$/,
 	);
 	if (convMatch) {
 		const conversationId = decodeURIComponent(convMatch[1]);
@@ -390,34 +443,6 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 
 		if (action === "presence" && request.method === "GET") {
 			return Response.json({ agents: await inboxStub(env).presence(conversationId) });
-		}
-
-		if (action === "integrity" && request.method === "GET") {
-			const events = await listIntegrityEvents(env.DB, {
-				conversationId,
-				status: (url.searchParams.get("status") ?? "open") as IntegrityStatus | "all",
-			});
-			return Response.json({ events });
-		}
-
-		if (action === "report" && request.method === "POST") {
-			const body = await readJson<IntegrityReportInput>(request);
-			const note = body.note?.trim();
-			if (!note) return Response.json({ error: "note is required" }, { status: 400 });
-			const id = crypto.randomUUID();
-			await recordIntegrity(env, {
-				id,
-				kind: "agent_report",
-				severity: "warning",
-				conversationId,
-				title: `客服回報訊息缺失：${note.slice(0, 80)}`,
-				details: { note, from: body.from ?? null, to: body.to ?? null },
-				startedAt: typeof body.from === "number" ? body.from : null,
-				endedAt: typeof body.to === "number" ? body.to : null,
-				createdBy: agentNameOf(request),
-			});
-			const events = await listIntegrityEvents(env.DB, { conversationId, status: "open" });
-			return Response.json({ events });
 		}
 
 		if (action === "reply" && request.method === "POST") {

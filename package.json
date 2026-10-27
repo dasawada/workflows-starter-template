@@ -53,6 +53,7 @@
 		"lint": "eslint .",
 		"loadtest": "node scripts/loadtest.mjs",
 		"preview": "npm run build && vite preview",
+		"reports": "node scripts/reports.mjs",
 		"test": "vitest run"
 	},
 	"type": "module"

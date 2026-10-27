@@ -39,7 +39,7 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 | `worker/workflow.ts` | `ReplyReminderWorkflow` 逾時提醒 |
 | `worker/metrics.ts` | Analytics Engine 指標（`recordMetric` / `timed`），寫入失敗一律吞掉 |
 | `worker/outbox.ts` | 客服發訊唯一入口 `sendOutbound`：先寫 D1（pending）再帶 `X-Line-Retry-Key` 推送；`detectConflict` 做接手／後到回覆的 409 |
-| `worker/integrity.ts` | 缺口紀錄 `recordIntegrity`（dedupeKey 合併計數）、健康狀態、`runMaintenance`（cron 每 5 分鐘與 `POST /api/integrity/maintenance`） |
+| `worker/integrity.ts` | 缺口紀錄 `recordIntegrity`（dedupeKey 合併計數）、健康狀態、`runMaintenance`（cron 每 5 分鐘與 `POST /api/integrity/maintenance`）。**客服台不顯示這些**；工程端用 `npm run reports`（`scripts/reports.mjs`，直接讀正式 D1）每天讀取與結案 |
 | `worker/media.ts` | 附件下載 `storeMedia`：404/410 → expired 記缺口；其他失敗 → failed 由排程重試到 5 次 |
 | `worker/import-csv.ts` | 官方後台 CSV：解析、欄位偵測、名稱配對、冪等寫入、未配對列指派 |
 | `worker/pnp.ts` | 通知型訊息：電話號碼只存 SHA-256 與遮罩，`X-Line-Delivery-Tag` = notification id |
@@ -83,6 +83,7 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 - 客服台目前為單一共用 `CONSOLE_TOKEN`，無個別帳號。客服名稱由前端以 `X-Agent-Name`（URI 編碼）自報，只用於接手／在看／衝突偵測／署名，不是身分驗證。
 - 客服發訊一律走 `worker/outbox.ts`，不要在別處直接呼叫 `client.push`。`delivery_status`：pending（排程會重推，LINE 回 409 視為已送達）／sent／failed（4xx，客服可重試）／unknown（超過 24 小時，記 `send_unknown` 缺口）。
 - 缺口紀錄 `integrity_events` 用 `dedupe_key` 合併（`ON CONFLICT(dedupe_key) WHERE dedupe_key IS NOT NULL`），重送以小時為桶。DLQ consumer 把放棄的事件連原始 payload 記成 `event_dead_lettered`。
+- 客服回報只有一種入口：泡泡旁的驚嘆號 → `POST /api/messages/:id/report`，伺服器自動收齊該訊息、前後各 5 則、送達／附件狀態、相關缺口進 `details.context`，同一則重複按只累加 count。客服台沒有完整性頁面、橫幅或數字卡；判讀與修正是工程端的事，不要再把內部狀態（queue 模式、markAsReadMode、cron）做成給客服看的介面。
 - CSV 匯入的訊息 `source = manager_csv`、`external_id = csv:<hash>`，不動未讀與逾時；與 webhook 已收到的訊息以「同一分鐘 + 同文字」視為重複。官方 CSV 的實際欄位名稱尚未以真實檔案驗證，欄位偵測靠關鍵字，偵測不到時前端要求指定。
 - PNP 的 `to` 是 E.164（含 `+`）的 SHA-256 hex，端點 `POST https://api.line.me/bot/pnp/push`；是否含 `+` 與實際回應格式尚未在正式環境驗證。
 - 一般回覆只能純文字，圖片／Flex Message 發送尚未做。

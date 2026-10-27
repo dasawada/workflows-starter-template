@@ -459,6 +459,33 @@ export async function clearMarkAsReadToken(
 		.run();
 }
 
+/** 回報用：某則訊息前後各 n 則，給工程端讀上下文 */
+export async function listMessagesAround(db: D1Database, message: Message, n = 5): Promise<Message[]> {
+	const results = await db.batch([
+		db
+			.prepare("SELECT * FROM messages WHERE conversation_id = ? AND created_at <= ? AND id != ? ORDER BY created_at DESC LIMIT ?")
+			.bind(message.conversationId, message.createdAt, message.id, n),
+		db
+			.prepare("SELECT * FROM messages WHERE conversation_id = ? AND created_at > ? ORDER BY created_at LIMIT ?")
+			.bind(message.conversationId, message.createdAt, n),
+	]);
+	const before = ((results[0].results ?? []) as MessageRow[]).map(toMessage).reverse();
+	const after = ((results[1].results ?? []) as MessageRow[]).map(toMessage);
+	return [...before, message, ...after];
+}
+
+/** 標記訊息已被客服回報（泡泡上顯示） */
+export async function markMessageReported(db: D1Database, messageId: string, reportedAt: number): Promise<Message | null> {
+	const results = await db.batch([
+		db
+			.prepare("UPDATE messages SET metadata = json_set(COALESCE(metadata, '{}'), '$.reportedAt', ?) WHERE id = ?")
+			.bind(reportedAt, messageId),
+		db.prepare("SELECT * FROM messages WHERE id = ?").bind(messageId),
+	]);
+	const row = firstRow<MessageRow>(results, 1);
+	return row ? toMessage(row) : null;
+}
+
 /**
  * 依 LINE message id 找本地訊息（引用訊息用）。
  * 使用者的訊息 external_id 就是 LINE id；我方一次推送多則時只有第一則在 external_id，
