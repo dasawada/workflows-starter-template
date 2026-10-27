@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { SendMessagesInput } from "../../shared/types";
 import { MESSAGE_PRESETS } from "../presets";
 import { LinePreview } from "./LinePreview";
+import { useEscape } from "../hooks/useEscape";
 
 interface Props {
 	onClose: () => void;
@@ -31,6 +32,7 @@ function saveDraft(key: string, text: string) {
 }
 
 export function ComposeDialog({ onClose, onSend, initialMessages, onBackToBuilder }: Props) {
+	useEscape(onClose);
 	const draft = useMemo(loadDraft, []);
 	const [presetKey, setPresetKey] = useState(initialMessages ? "custom" : (draft?.key ?? MESSAGE_PRESETS[0].key));
 	const [text, setText] = useState(

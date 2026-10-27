@@ -403,6 +403,8 @@ function ConversationPicker({ onPick, compact, picked }: { onPick: (id: string) 
 			<input
 				value={q}
 				onChange={(e) => setQ(e.target.value)}
+				onKeyDown={(e) => e.key === "Escape" && setResults([])}
+				onBlur={() => window.setTimeout(() => setResults([]), 150)}
 				placeholder={picked ? `已選擇 ${picked}` : "搜尋對話名稱或 ID"}
 				className={`rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-2 py-1 ${compact ? "w-44" : "w-56"}`}
 			/>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { SendMessagesInput } from "../../../shared/types";
 import { LIMITS } from "../../builder/limits";
+import { useEscape } from "../../hooks/useEscape";
 import { BUILDER_PRESETS } from "../../builder/presets";
 import { countTrackable, toLineMessages, validateDraft } from "../../builder/toLine";
 import type { BuilderDraft, MessageDraft, MessageKind } from "../../builder/types";
@@ -31,6 +32,7 @@ function loadDraft(): { presetKey: string; draft: BuilderDraft } | null {
 }
 
 export function BuilderDialog({ onClose, onSend, onSwitchToJson }: Props) {
+	useEscape(onClose);
 	const saved = useMemo(loadDraft, []);
 	const [presetKey, setPresetKey] = useState(saved?.presetKey ?? BUILDER_PRESETS[0].key);
 	const [draft, setDraft] = useState<BuilderDraft>(saved?.draft ?? BUILDER_PRESETS[0].build());
