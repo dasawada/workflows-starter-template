@@ -29,6 +29,7 @@ interface ConversationRow {
 	unread_count: number;
 	needs_attention: number;
 	reminder_instance_id: string | null;
+	mark_as_read_token: string | null;
 	created_at: number;
 	updated_at: number;
 }
@@ -45,6 +46,8 @@ interface MessageRow {
 	metadata: string | null;
 	external_id: string | null;
 	created_at: number;
+	edited_at: number | null;
+	unsent_at: number | null;
 }
 
 function toConversation(row: ConversationRow): Conversation {
@@ -87,6 +90,8 @@ function toMessage(row: MessageRow): Message {
 		metadata,
 		externalId: row.external_id,
 		createdAt: row.created_at,
+		editedAt: row.edited_at ?? null,
+		unsentAt: row.unsent_at ?? null,
 	};
 }
 
@@ -237,6 +242,8 @@ export interface NewMessageInput {
 	metadata?: Record<string, unknown> | null;
 	externalId?: string | null;
 	createdAt: number;
+	/** 使用者訊息附的 markAsReadToken，記在對話上供客服讀過後呼叫已讀 API */
+	markAsReadToken?: string | null;
 }
 
 /** 對話清單上顯示的預覽文字 */
@@ -295,7 +302,8 @@ export async function insertMessage(
 				.prepare(
 					`UPDATE conversations SET
 						last_message_text = ?, last_message_at = ?, last_inbound_at = ?,
-						unread_count = unread_count + 1, status = 'open', updated_at = ?
+						unread_count = unread_count + 1, status = 'open', updated_at = ?,
+						mark_as_read_token = COALESCE(?, mark_as_read_token)
 					 WHERE id = ? AND EXISTS (SELECT 1 FROM messages WHERE id = ?)`,
 				)
 				.bind(
@@ -303,6 +311,7 @@ export async function insertMessage(
 					input.createdAt,
 					input.createdAt,
 					input.createdAt,
+					input.markAsReadToken ?? null,
 					input.conversationId,
 					input.id,
 				)
@@ -378,10 +387,13 @@ export async function listMessages(
 	return results.map(toMessage).reverse();
 }
 
+/**
+ * 客服打開對話：清除未讀，並交回尚未用掉的 markAsReadToken（呼叫 LINE 已讀 API 用）。
+ */
 export async function markConversationRead(
 	db: D1Database,
 	conversationId: string,
-): Promise<Conversation | null> {
+): Promise<{ conversation: Conversation; markAsReadToken: string | null } | null> {
 	const results = await db.batch([
 		db
 			.prepare("UPDATE conversations SET unread_count = 0, updated_at = ? WHERE id = ?")
@@ -389,7 +401,114 @@ export async function markConversationRead(
 		db.prepare("SELECT * FROM conversations WHERE id = ?").bind(conversationId),
 	]);
 	const row = firstRow<ConversationRow>(results, 1);
-	return row ? toConversation(row) : null;
+	if (!row) return null;
+	return { conversation: toConversation(row), markAsReadToken: row.mark_as_read_token };
+}
+
+/** 已讀 API 成功後清掉 token，避免重複呼叫；若期間又有新訊息（token 已換）則不動 */
+export async function clearMarkAsReadToken(
+	db: D1Database,
+	conversationId: string,
+	token: string,
+): Promise<void> {
+	await db
+		.prepare("UPDATE conversations SET mark_as_read_token = NULL WHERE id = ? AND mark_as_read_token = ?")
+		.bind(conversationId, token)
+		.run();
+}
+
+/** 依 LINE message id 找本地訊息（引用訊息用） */
+export async function findMessageByExternalId(
+	db: D1Database,
+	externalId: string,
+): Promise<Message | null> {
+	const row = await db
+		.prepare("SELECT * FROM messages WHERE external_id = ?")
+		.bind(externalId)
+		.first<MessageRow>();
+	return row ? toMessage(row) : null;
+}
+
+/**
+ * 使用者撤回訊息：清掉內容與附件 key，只留時間軸位置與發言者；對話預覽若正是這則也一併改掉。
+ * 以 unsent_at IS NULL 為條件，重送的 unsend 事件不會重複處理（回傳 null）。
+ * 回傳撤回前的 media_key，讓呼叫端刪 R2 物件。
+ */
+export async function unsendMessage(
+	db: D1Database,
+	externalId: string,
+	unsentAt: number,
+): Promise<{ message: Message; conversation: Conversation; mediaKey: string | null } | null> {
+	const results = await db.batch([
+		db.prepare("SELECT * FROM messages WHERE external_id = ? AND unsent_at IS NULL").bind(externalId),
+		db
+			.prepare(
+				`UPDATE messages SET
+					text = NULL, media_key = NULL, media_content_type = NULL, unsent_at = ?,
+					metadata = json_object(
+						'senderName', json_extract(metadata, '$.senderName'),
+						'senderUserId', json_extract(metadata, '$.senderUserId'))
+				 WHERE external_id = ? AND unsent_at IS NULL`,
+			)
+			.bind(unsentAt, externalId),
+		db
+			.prepare(
+				`UPDATE conversations SET last_message_text = '[訊息已撤回]', updated_at = ?
+				 WHERE id = (SELECT conversation_id FROM messages WHERE external_id = ? AND unsent_at = ?)
+				   AND last_message_at = (SELECT created_at FROM messages WHERE external_id = ?)`,
+			)
+			.bind(unsentAt, externalId, unsentAt, externalId),
+		db.prepare("SELECT * FROM messages WHERE external_id = ?").bind(externalId),
+		db
+			.prepare("SELECT * FROM conversations WHERE id = (SELECT conversation_id FROM messages WHERE external_id = ?)")
+			.bind(externalId),
+	]);
+	const before = firstRow<MessageRow>(results, 0);
+	if (!before || !results[1].meta.changes) return null;
+	const row = firstRow<MessageRow>(results, 3);
+	const convRow = firstRow<ConversationRow>(results, 4);
+	if (!row || !convRow) return null;
+	return { message: toMessage(row), conversation: toConversation(convRow), mediaKey: before.media_key };
+}
+
+/**
+ * 群組文字訊息被編輯：以同一個 LINE message id 更新文字，保留第一版在 metadata.originalText。
+ * 事件可能亂序，只接受比目前 edited_at 更新的版本；已撤回的訊息不再更新。
+ * 回傳 null 代表找不到、過期或重送。
+ */
+export async function editMessageText(
+	db: D1Database,
+	externalId: string,
+	text: string,
+	editedAt: number,
+): Promise<{ message: Message; conversation: Conversation } | null> {
+	const results = await db.batch([
+		db
+			.prepare(
+				`UPDATE messages SET
+					text = ?, edited_at = ?,
+					metadata = json_set(COALESCE(metadata, '{}'), '$.originalText',
+						COALESCE(json_extract(metadata, '$.originalText'), text))
+				 WHERE external_id = ? AND unsent_at IS NULL AND (edited_at IS NULL OR edited_at < ?)`,
+			)
+			.bind(text, editedAt, externalId, editedAt),
+		db
+			.prepare(
+				`UPDATE conversations SET last_message_text = ?, updated_at = ?
+				 WHERE id = (SELECT conversation_id FROM messages WHERE external_id = ? AND edited_at = ?)
+				   AND last_message_at = (SELECT created_at FROM messages WHERE external_id = ?)`,
+			)
+			.bind(text, editedAt, externalId, editedAt, externalId),
+		db.prepare("SELECT * FROM messages WHERE external_id = ?").bind(externalId),
+		db
+			.prepare("SELECT * FROM conversations WHERE id = (SELECT conversation_id FROM messages WHERE external_id = ?)")
+			.bind(externalId),
+	]);
+	if (!results[0].meta.changes) return null;
+	const row = firstRow<MessageRow>(results, 2);
+	const convRow = firstRow<ConversationRow>(results, 3);
+	if (!row || !convRow) return null;
+	return { message: toMessage(row), conversation: toConversation(convRow) };
 }
 
 export async function setConversationStatus(

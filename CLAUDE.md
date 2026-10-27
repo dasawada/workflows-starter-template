@@ -74,5 +74,7 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 - `test/reminder.test.ts` 會印一行 `WorkflowTimeoutError` 的 uncaught exception，來自測試工具 `forceEventTimeout` 內部，測試本身通過，可忽略。
 - 客服台目前為單一共用 `CONSOLE_TOKEN`，無個別帳號。
 - 一般回覆只能純文字，圖片／Flex Message 發送尚未做。
+- 對話完整性（migration 0005）：`quotedMessageId` 在收訊時以 `findMessageByExternalId` 做快照存進 `metadata.quote`，找不到原文時 `messageId: null`，前端明示「無法取得」；`unsend` 清掉 text／media／R2 物件並設 `unsent_at`；`messageEdited`（目前僅群組文字訊息）以同一個 LINE message id 更新 text、第一版留在 `metadata.originalText`，只接受 timestamp 較新的版本；`imageSet`、`senderUserId`、`isRedelivery` 原樣存 metadata。
+- 已讀：使用者訊息的 `markAsReadToken` 存在 `conversations.mark_as_read_token`，客服 `POST /read` 時呼叫 `POST /v2/bot/chat/markAsRead`，成功才清掉 token。只有官方帳號 Chat 開啟（`GET /api/line/info` 的 `markAsReadMode = manual`）才有效，Chat 關閉時 LINE 回 400、客服台照常。`messageEdited` 的事件結構與 `markAsReadToken` 的位置是依文件寫的，正式環境第一次收到時用 `npx wrangler tail` 核對。
 - 互動訊息編輯台只產生五種受控版型（text / confirm / buttons / carousel / 固定版面的 Flex 資訊卡），不開放自由 Flex；新版型要先在 `types.ts` 加草稿型別、`toLine.ts` 加轉換與檢查、`MessageForm.tsx` 加表單，並在 `test/builder.test.ts` 加測試。
 - 互動訊息：`POST /api/conversations/:id/send` 接任意 LINE 訊息陣列；`worker/line.ts` 的 `instrumentPostbacks` 會把所有 postback 的 data 改寫成 `prompt=<id>&choice=<原 data 或 label>` 並萃取選項，有 postback 才建立 `prompts` 紀錄（message type `prompt`），否則 type `rich`。使用者點選後 `worker/webhook-line.ts` 的 `handlePostback` 寫入 `prompts` / `prompt_responses`。`/prompt` 是舊介面，內部也走同一條 `sendTracked`。

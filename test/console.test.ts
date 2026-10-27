@@ -290,3 +290,185 @@ describe("conversation list paging, search and stats", () => {
 		expect(s.unreadTotal).toBeGreaterThanOrEqual(3);
 	});
 });
+
+describe("conversation integrity", () => {
+	async function messagesOf(id: string): Promise<Message[]> {
+		const res = await SELF.fetch(
+			`https://console.test/api/conversations/${encodeURIComponent(id)}/messages`,
+			{ headers: AUTH },
+		);
+		return ((await res.json()) as { messages: Message[] }).messages;
+	}
+
+	async function conversationOf(id: string): Promise<Conversation | undefined> {
+		const res = await SELF.fetch("https://console.test/api/conversations?status=all&limit=100", { headers: AUTH });
+		const { conversations } = (await res.json()) as { conversations: Conversation[] };
+		return conversations.find((c) => c.id === id);
+	}
+
+	it("snapshots the quoted message when it exists locally, and flags it when it does not", async () => {
+		mockLine("GET", "/v2/bot/profile/U-quote", lineJson({ displayName: "Quoter" }), 3);
+		await postWebhook([textEvent("U-quote", "請問要寄到台北還是新竹？", "m-q-original")]);
+		await postWebhook([
+			{
+				...textEvent("U-quote", "新竹，謝謝。", "m-q-reply"),
+				message: { id: "m-q-reply", type: "text", text: "新竹，謝謝。", quoteToken: "qt-1", quotedMessageId: "m-q-original" },
+			},
+			{
+				...textEvent("U-quote", "那個呢？", "m-q-orphan"),
+				message: { id: "m-q-orphan", type: "text", text: "那個呢？", quotedMessageId: "m-before-integration" },
+			},
+		]);
+
+		const messages = await messagesOf("line:U-quote");
+		const original = messages.find((m) => m.externalId === "m-q-original")!;
+		const reply = messages.find((m) => m.externalId === "m-q-reply")!;
+		const orphan = messages.find((m) => m.externalId === "m-q-orphan")!;
+		expect(reply.metadata).toMatchObject({
+			quoteToken: "qt-1",
+			quote: { externalId: "m-q-original", messageId: original.id, text: "請問要寄到台北還是新竹？", sender: "user" },
+		});
+		expect(orphan.metadata?.quote).toEqual({
+			externalId: "m-before-integration",
+			messageId: null,
+			text: null,
+			type: null,
+			sender: null,
+		});
+	});
+
+	it("clears content on unsend, deletes the media object and updates the preview", async () => {
+		mockLine("GET", "/v2/bot/profile/U-unsend", lineJson({ displayName: "Undo" }), 2);
+		mockLine("GET", "/v2/bot/message/m-unsend-img/content", () =>
+			new Response("png-bytes", { headers: { "content-type": "image/png" } }),
+		);
+		await postWebhook([textEvent("U-unsend", "先傳個字", "m-unsend-text")]);
+		await postWebhook([
+			{
+				type: "message",
+				timestamp: Date.now(),
+				source: { type: "user", userId: "U-unsend" },
+				replyToken: "rt",
+				message: { id: "m-unsend-img", type: "image", contentProvider: { type: "line" } },
+			},
+		]);
+		// 媒體下載在 waitUntil，讓它跑完
+		await new Promise((r) => setTimeout(r, 50));
+		let [, image] = await messagesOf("line:U-unsend");
+		expect(image.mediaKey).toBe("line/m-unsend-img");
+		expect(await env.MEDIA.head("line/m-unsend-img")).not.toBeNull();
+
+		const unsend = {
+			type: "unsend",
+			timestamp: Date.now(),
+			source: { type: "user", userId: "U-unsend" },
+			unsend: { messageId: "m-unsend-img" },
+		};
+		await postWebhook([unsend]);
+		await postWebhook([unsend]); // 重送不會出錯
+
+		[, image] = await messagesOf("line:U-unsend");
+		expect(image.unsentAt).toBeTypeOf("number");
+		expect(image.text).toBeNull();
+		expect(image.mediaKey).toBeNull();
+		expect(await env.MEDIA.head("line/m-unsend-img")).toBeNull();
+		expect((await conversationOf("line:U-unsend"))?.lastMessageText).toBe("[訊息已撤回]");
+	});
+
+	it("applies group message edits by message id, keeps the first version and ignores stale edits", async () => {
+		mockLine("GET", "/v2/bot/group/G-edit/summary", lineJson({ groupName: "編輯群" }));
+		mockLine("GET", "/v2/bot/group/G-edit/member/U-editor", lineJson({ displayName: "小編" }));
+		const t0 = Date.now();
+		await postWebhook([
+			{
+				type: "message",
+				timestamp: t0,
+				source: { type: "group", groupId: "G-edit", userId: "U-editor" },
+				replyToken: "rt",
+				message: { id: "m-edit", type: "text", text: "明天 3 點開會" },
+			},
+		]);
+		const edited = (text: string, timestamp: number) => ({
+			type: "messageEdited",
+			timestamp,
+			source: { type: "group", groupId: "G-edit", userId: "U-editor" },
+			message: { id: "m-edit", type: "text", text },
+		});
+		await postWebhook([edited("明天 4 點開會", t0 + 2000)]);
+		await postWebhook([edited("明天 3 點半開會", t0 + 1000)]); // 較舊的編輯晚到，必須忽略
+
+		const [message] = await messagesOf("line:group:G-edit");
+		expect(message.text).toBe("明天 4 點開會");
+		expect(message.editedAt).toBe(t0 + 2000);
+		expect(message.metadata).toMatchObject({
+			originalText: "明天 3 點開會",
+			senderUserId: "U-editor",
+			senderName: "小編",
+		});
+		expect((await conversationOf("line:group:G-edit"))?.lastMessageText).toBe("明天 4 點開會");
+	});
+
+	it("keeps image set information and the sender id even when the profile is unavailable", async () => {
+		mockLine("GET", "/v2/bot/group/G-set/summary", lineJson({ groupName: "圖集群" }));
+		mockLine("GET", "/v2/bot/group/G-set/member/U-anon", lineJson({ message: "not found" }, 404), 2);
+		mockLine("GET", "/v2/bot/message/m-set-1/content", () => new Response("a", { headers: { "content-type": "image/jpeg" } }));
+		mockLine("GET", "/v2/bot/message/m-set-2/content", () => new Response("b", { headers: { "content-type": "image/jpeg" } }));
+		const imageEvent = (id: string, index: number) => ({
+			type: "message",
+			timestamp: Date.now(),
+			source: { type: "group", groupId: "G-set", userId: "U-anon" },
+			replyToken: "rt",
+			deliveryContext: { isRedelivery: index === 2 },
+			message: { id, type: "image", contentProvider: { type: "line" }, imageSet: { id: "set-1", index, total: 2 } },
+		});
+		await postWebhook([imageEvent("m-set-2", 2), imageEvent("m-set-1", 1)]);
+		await new Promise((r) => setTimeout(r, 50));
+
+		const messages = await messagesOf("line:group:G-set");
+		expect(messages.map((m) => m.metadata?.imageSet)).toEqual([
+			{ id: "set-1", index: 2, total: 2 },
+			{ id: "set-1", index: 1, total: 2 },
+		]);
+		expect(messages[0].metadata).toMatchObject({ senderUserId: "U-anon", isRedelivery: true });
+		expect(messages[0].metadata?.senderName).toBeUndefined();
+		expect(messages[1].metadata?.isRedelivery).toBeUndefined();
+	});
+
+	it("marks the chat as read on LINE when an agent opens the conversation", async () => {
+		mockLine("GET", "/v2/bot/profile/U-read", lineJson({ displayName: "Reader" }), 2);
+		await postWebhook([
+			{ ...textEvent("U-read", "有人在嗎", "m-read-1"), markAsReadToken: "mart-1" },
+			{ ...textEvent("U-read", "在嗎？", "m-read-2"), markAsReadToken: "mart-2" },
+		]);
+
+		let sent: unknown = null;
+		mockLine("POST", "/v2/bot/chat/markAsRead", async (req) => {
+			sent = await req.json();
+			return Response.json({});
+		});
+		const read = async () =>
+			SELF.fetch("https://console.test/api/conversations/line%3AU-read/read", { method: "POST", headers: AUTH });
+
+		let res = await read();
+		expect(res.status).toBe(200);
+		expect(sent).toEqual({ markAsReadToken: "mart-2" }); // 最新一則的 token，LINE 會連同之前的一起標已讀
+
+		// 第二次打開沒有新訊息，不再呼叫 LINE（afterEach 會確認沒有多餘的呼叫）
+		res = await read();
+		expect(res.status).toBe(200);
+
+		// Chat 關閉時 LINE 回 400：客服台照常運作，token 保留
+		await postWebhook([{ ...textEvent("U-read", "再問一次", "m-read-3"), markAsReadToken: "mart-3" }]);
+		mockLine("POST", "/v2/bot/chat/markAsRead", lineJson({ message: "invalid token" }, 400));
+		res = await read();
+		expect(res.status).toBe(200);
+		expect(((await res.json()) as { conversation: Conversation }).conversation.unreadCount).toBe(0);
+	});
+
+	it("exposes the bot chat mode so the read mode can be verified", async () => {
+		mockLine("GET", "/v2/bot/info", lineJson({ userId: "Ubot", basicId: "@shop", displayName: "商店", chatMode: "chat", markAsReadMode: "manual" }));
+		const res = await SELF.fetch("https://console.test/api/line/info", { headers: AUTH });
+		expect(res.status).toBe(200);
+		expect(await res.json()).toMatchObject({ basicId: "@shop", chatMode: "chat", markAsReadMode: "manual" });
+	});
+});

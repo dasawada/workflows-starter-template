@@ -1,6 +1,7 @@
 import {
 	LineClient,
 	conversationTarget,
+	markAsReadTokenOf,
 	parsePromptPostback,
 	stickerImageUrl,
 	toMessageType,
@@ -9,16 +10,20 @@ import {
 	type LineWebhookEvent,
 } from "./line";
 import {
+	editMessageText,
+	findMessageByExternalId,
 	getConversation,
 	getPrompt,
 	getReminderInstanceId,
 	insertMessage,
 	recordPromptResponse,
 	setReminderInstanceId,
+	unsendMessage,
 	updateMessageMedia,
 	updateMessageMetadata,
 	upsertConversation,
 } from "./db";
+import type { MessageQuote } from "../shared/types";
 import { inboxStub } from "./inbox-do";
 import { recordMetric } from "./metrics";
 
@@ -147,10 +152,25 @@ async function handleEvent(
 	const target = conversationTarget(event.source);
 	if (!target) return;
 
+	// LINE 標記為重送的事件另外計數：這是「曾經接收失敗」的證據，之後對帳用
+	if (event.deliveryContext?.isRedelivery) {
+		recordMetric(env, { name: "webhook.redelivery", labels: [event.type], values: [1] });
+	}
+
 	switch (event.type) {
 		case "message":
 			if (event.message) {
 				await handleMessage(event, target, env, ctx, client);
+			}
+			return;
+		case "messageEdited":
+			if (event.message) {
+				await handleMessageEdited(event, env);
+			}
+			return;
+		case "unsend":
+			if (event.unsend?.messageId) {
+				await handleUnsend(event, env);
 			}
 			return;
 		case "postback":
@@ -233,9 +253,17 @@ async function handleMessage(
 	let metadata: Record<string, unknown> | null = null;
 
 	switch (content.type) {
-		case "text":
-			text = (content as { text: string }).text;
+		case "text": {
+			const t = content as Extract<typeof content, { type: "text" }>;
+			text = t.text;
+			if (t.quoteToken || t.quotedMessageId || t.mention) {
+				metadata = {};
+				if (t.quoteToken) metadata.quoteToken = t.quoteToken;
+				if (t.quotedMessageId) metadata.quote = await resolveQuote(env, t.quotedMessageId);
+				if (t.mention) metadata.mention = t.mention;
+			}
 			break;
+		}
 		case "sticker": {
 			const s = content as { packageId: string; stickerId: string };
 			metadata = {
@@ -268,29 +296,38 @@ async function handleMessage(
 			const m = content as {
 				contentProvider?: { type: string; originalContentUrl?: string };
 				duration?: number;
+				imageSet?: { id: string; index: number; total: number };
+				quoteToken?: string;
 			};
 			metadata = {
 				provider: m.contentProvider?.type,
 				externalUrl: m.contentProvider?.originalContentUrl,
 				duration: m.duration,
 			};
+			// 多張圖片：保留圖集資訊，前端依 index 標示，而不是靠到達順序
+			if (m.imageSet) metadata.imageSet = m.imageSet;
+			if (m.quoteToken) metadata.quoteToken = m.quoteToken;
 			break;
 		}
 		default:
 			break;
 	}
 
-	// 群組訊息附上發言者名稱
+	// 群組訊息：一定保留發言者 userId（同名成員才分得開），名稱拿得到再補
 	if (target.kind !== "user" && event.source.userId) {
+		metadata = { ...(metadata ?? {}), senderUserId: event.source.userId };
 		try {
 			const member = await client.getProfile(event.source.userId, {
 				kind: target.kind,
 				id: target.recipientId,
 			});
-			metadata = { ...(metadata ?? {}), senderName: member?.displayName };
+			if (member?.displayName) metadata.senderName = member.displayName;
 		} catch {
-			// ignore
+			// 拿不到個人資料（未授權或已離群）就只留 userId
 		}
+	}
+	if (event.deliveryContext?.isRedelivery) {
+		metadata = { ...(metadata ?? {}), isRedelivery: true };
 	}
 
 	const inserted = await insertMessage(env.DB, {
@@ -303,6 +340,7 @@ async function handleMessage(
 		metadata,
 		externalId: content.id,
 		createdAt: now,
+		markAsReadToken: markAsReadTokenOf(event),
 	});
 	if (!inserted) return; // LINE 重送的重複事件
 
@@ -326,6 +364,60 @@ async function handleMessage(
 	}
 
 	await startReminderIfNeeded(target.conversationId, env);
+}
+
+/**
+ * 引用訊息：LINE 只給 quotedMessageId，不給原文。本地找得到就做快照，找不到也要留關聯並明確標示，
+ * 讓客服知道「這是在回某則我們沒有的訊息」，而不是只看到一句沒頭沒尾的話。
+ */
+async function resolveQuote(env: Env, quotedMessageId: string): Promise<MessageQuote> {
+	const original = await findMessageByExternalId(env.DB, quotedMessageId);
+	if (!original) {
+		return { externalId: quotedMessageId, messageId: null, text: null, type: null, sender: null };
+	}
+	return {
+		externalId: quotedMessageId,
+		messageId: original.id,
+		text: original.unsentAt ? null : original.text,
+		type: original.type,
+		sender: original.sender,
+	};
+}
+
+/** 使用者撤回：清除內容與 R2 附件，時間軸上留下「已撤回」的位置 */
+async function handleUnsend(event: LineWebhookEvent, env: Env): Promise<void> {
+	const result = await unsendMessage(env.DB, event.unsend!.messageId, event.timestamp || Date.now());
+	if (!result) return; // 本地沒有這則，或已處理過（重送）
+	if (result.mediaKey) {
+		try {
+			await env.MEDIA.delete(result.mediaKey);
+		} catch (err) {
+			console.error("delete unsent media failed", result.mediaKey, err);
+		}
+	}
+	await inboxStub(env).broadcast({
+		type: "message.new",
+		message: result.message,
+		conversation: result.conversation,
+	});
+}
+
+/**
+ * 群組文字訊息被編輯（messageEdited）：message.id 與原訊息相同，以此更新內容；
+ * 事件可能亂序，db 層只接受較新的版本。
+ */
+async function handleMessageEdited(event: LineWebhookEvent, env: Env): Promise<void> {
+	const content = event.message!;
+	if (content.type !== "text") return;
+	const text = (content as { text?: string }).text;
+	if (typeof text !== "string") return;
+	const result = await editMessageText(env.DB, content.id, text, event.timestamp || Date.now());
+	if (!result) return;
+	await inboxStub(env).broadcast({
+		type: "message.new",
+		message: result.message,
+		conversation: result.conversation,
+	});
 }
 
 /**

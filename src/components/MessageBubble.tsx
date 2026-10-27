@@ -1,4 +1,4 @@
-import type { Message } from "../../shared/types";
+import type { Message, MessageQuote } from "../../shared/types";
 import { api } from "../api";
 import { formatBytes, formatTime } from "../format";
 import { LinePreview } from "./LinePreview";
@@ -19,7 +19,11 @@ export function MessageBubble({ message }: Props) {
 	}
 
 	const mine = message.direction === "outbound";
-	const senderName = message.metadata?.senderName as string | undefined;
+	const senderName =
+		(message.metadata?.senderName as string | undefined) ??
+		(message.metadata?.senderUserId as string | undefined);
+	const quote = message.unsentAt ? null : (message.metadata?.quote as MessageQuote | undefined);
+	const imageSet = message.metadata?.imageSet as { index: number; total: number } | undefined;
 
 	return (
 		<div className={`flex ${mine ? "justify-end" : "justify-start"} my-1`}>
@@ -29,17 +33,59 @@ export function MessageBubble({ message }: Props) {
 				)}
 				<div
 					className={`rounded-2xl px-3.5 py-2 text-sm whitespace-pre-wrap break-words ${
-						mine
-							? "bg-emerald-600 text-white rounded-br-md"
-							: "bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 ring-glass rounded-bl-md"
+						message.unsentAt
+							? "bg-neutral-100 dark:bg-neutral-800/60 text-neutral-400 italic rounded-bl-md"
+							: mine
+								? "bg-emerald-600 text-white rounded-br-md"
+								: "bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 ring-glass rounded-bl-md"
 					}`}
 				>
-					<Content message={message} />
+					{quote && <QuoteBlock quote={quote} mine={mine} />}
+					{message.unsentAt ? <>此訊息已被使用者撤回</> : <Content message={message} />}
 				</div>
 				<span className="text-[10px] text-neutral-400 mt-0.5 px-1">
 					{formatTime(message.createdAt)}
+					{imageSet && ` · 第 ${imageSet.index}/${imageSet.total} 張`}
+					{message.editedAt && !message.unsentAt && " · 已編輯"}
 				</span>
 			</div>
+		</div>
+	);
+}
+
+/**
+ * 引用區塊：本地找得到原文就顯示，找不到一定要明講，客服才知道這句話是在回某則我們沒有的訊息。
+ */
+function QuoteBlock({ quote, mine }: { quote: MessageQuote; mine: boolean }) {
+	const tone = mine ? "border-white/60 text-white/85" : "border-emerald-500 text-neutral-500 dark:text-neutral-400";
+	if (!quote.messageId) {
+		return (
+			<div className={`border-l-2 pl-2 mb-1.5 text-xs ${tone}`}>
+				<div className="font-medium">引用的原始訊息無法取得</div>
+				<div className="opacity-80">可能發送於串接之前，或來自未同步的訊息來源</div>
+			</div>
+		);
+	}
+	const who = quote.sender === "user" ? "使用者" : quote.sender === "agent" ? "客服" : "系統";
+	const preview =
+		quote.text ??
+		(quote.type === "image"
+			? "[圖片]"
+			: quote.type === "video"
+				? "[影片]"
+				: quote.type === "audio"
+					? "[語音]"
+					: quote.type === "file"
+						? "[檔案]"
+						: quote.type === "sticker"
+							? "[貼圖]"
+							: quote.type === "location"
+								? "[位置]"
+								: "[訊息內容已不可用]");
+	return (
+		<div className={`border-l-2 pl-2 mb-1.5 text-xs ${tone}`}>
+			<div className="font-medium">引用{who}訊息</div>
+			<div className="line-clamp-3 opacity-90">{preview}</div>
 		</div>
 	);
 }

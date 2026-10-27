@@ -45,9 +45,41 @@ export interface Message {
 	/** 有媒體時，前端用 /api/media/:key 取得 */
 	mediaKey: string | null;
 	mediaContentType: string | null;
+	/**
+	 * 依類型存放的附加資料。與對話完整性有關的鍵：
+	 * - quote: 使用者引用的訊息 { externalId, messageId, text, type, sender }；messageId 為 null 代表本地找不到原文
+	 * - quoteToken: 這則訊息可被我方引用時的 token
+	 * - imageSet: 一次傳多張圖片時的 { id, index, total }
+	 * - senderUserId / senderName: 群組發言者
+	 * - isRedelivery: LINE 標記為重送的事件
+	 * - originalText: 被編輯前的第一版文字
+	 */
 	metadata: Record<string, unknown> | null;
 	externalId: string | null;
 	createdAt: number;
+	/** 群組文字訊息被編輯的時間；text 已是最新版本 */
+	editedAt: number | null;
+	/** 使用者撤回的時間；撤回後 text / media 已清除，只保留時間軸位置 */
+	unsentAt: number | null;
+}
+
+/** 引用訊息在 metadata.quote 的結構 */
+export interface MessageQuote {
+	externalId: string;
+	messageId: string | null;
+	text: string | null;
+	type: MessageType | null;
+	sender: MessageSender | null;
+}
+
+/** GET /v2/bot/info 的摘要，用來確認 Chat 模式與已讀模式 */
+export interface LineBotInfo {
+	userId: string;
+	basicId: string;
+	displayName: string;
+	pictureUrl: string | null;
+	chatMode: "chat" | "bot";
+	markAsReadMode: "manual" | "auto";
 }
 
 export interface PromptOption {

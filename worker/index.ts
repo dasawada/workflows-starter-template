@@ -14,6 +14,7 @@ import {
 } from "./line";
 import { AGENT_REPLIED_EVENT } from "./workflow";
 import {
+	clearMarkAsReadToken,
 	createPrompt,
 	getConversation,
 	getStats,
@@ -49,6 +50,7 @@ import type {
  * - POST /api/conversations/:id/read        清除未讀
  * - POST /api/conversations/:id/status      { status: "open" | "closed" }
  * - GET  /api/media/:key                    R2 媒體
+ * - GET  /api/line/info                     官方帳號資訊（chatMode / markAsReadMode），確認已讀模式設定
  */
 export default {
 	async fetch(request, env, ctx): Promise<Response> {
@@ -116,6 +118,15 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 			return Response.json(await getStats(env.DB));
 		}
 
+		if (pathname === "/api/line/info" && request.method === "GET") {
+			if (!env.LINE_CHANNEL_ACCESS_TOKEN) {
+				return Response.json({ error: "LINE_CHANNEL_ACCESS_TOKEN not configured" }, { status: 500 });
+			}
+			const info = await lineClientFor(env).getBotInfo();
+			if (!info) return Response.json({ error: "LINE bot info unavailable" }, { status: 502 });
+			return Response.json(info);
+		}
+
 		if (pathname === "/api/prompts" && request.method === "GET") {
 			const status = (url.searchParams.get("status") ?? "all") as PromptStatus | "all";
 			const conversationId = url.searchParams.get("conversationId") ?? undefined;
@@ -145,14 +156,18 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 			}
 
 			if (action === "read" && request.method === "POST") {
-				const updated = await markConversationRead(env.DB, conversationId);
-				if (updated) {
+				const result = await markConversationRead(env.DB, conversationId);
+				if (result) {
 					await inboxStub(env).broadcast({
 						type: "conversation.updated",
-						conversation: updated,
+						conversation: result.conversation,
 					});
+					// 真人客服打開對話才通知 LINE 已讀；Chat 關閉（auto 模式）時 LINE 會回 400，吞掉即可
+					if (result.markAsReadToken && conversation.channel === "line" && env.LINE_CHANNEL_ACCESS_TOKEN) {
+						await markReadOnLine(env, conversationId, result.markAsReadToken);
+					}
 				}
-				return Response.json({ conversation: updated });
+				return Response.json({ conversation: result?.conversation ?? null });
 			}
 
 			if (action === "status" && request.method === "POST") {
@@ -260,6 +275,20 @@ async function handleReply(
 	await finishReminder(env, conversationId);
 
 	return Response.json({ message: inserted.message, conversation: inserted.conversation });
+}
+
+/** 呼叫 LINE 已讀 API；成功才清掉 token，失敗只記指標不影響客服台 */
+async function markReadOnLine(env: Env, conversationId: string, token: string): Promise<void> {
+	try {
+		const { ok, status } = await lineClientFor(env).markAsRead(token);
+		if (ok) {
+			await clearMarkAsReadToken(env.DB, conversationId, token);
+		} else {
+			console.warn("LINE markAsRead rejected", status, conversationId);
+		}
+	} catch (err) {
+		console.error("LINE markAsRead failed", err);
+	}
 }
 
 /** 客服已回覆：結束逾時提醒流程 */

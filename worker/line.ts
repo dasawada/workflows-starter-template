@@ -1,4 +1,4 @@
-import type { MessageType } from "../shared/types";
+import type { LineBotInfo, MessageType } from "../shared/types";
 
 /**
  * LINE Messaging API 介接層：簽章驗證、API 呼叫、webhook 事件型別。
@@ -78,13 +78,31 @@ export interface LineSource {
 	roomId?: string;
 }
 
+/** 多張圖片一次傳送時，每張圖都帶同一個 imageSet.id */
+export interface LineImageSet {
+	id: string;
+	index: number;
+	total: number;
+}
+
 export type LineMessageContent =
-	| { id: string; type: "text"; text: string }
+	| {
+			id: string;
+			type: "text";
+			text: string;
+			quoteToken?: string;
+			/** 使用者引用的訊息 id；LINE 不附原文，要靠本地紀錄找 */
+			quotedMessageId?: string;
+			emojis?: unknown[];
+			mention?: unknown;
+	  }
 	| {
 			id: string;
 			type: "image" | "video" | "audio";
 			contentProvider: { type: "line" | "external"; originalContentUrl?: string };
 			duration?: number;
+			imageSet?: LineImageSet;
+			quoteToken?: string;
 	  }
 	| { id: string; type: "file"; fileName: string; fileSize: number }
 	| { id: string; type: "sticker"; packageId: string; stickerId: string }
@@ -99,14 +117,34 @@ export type LineMessageContent =
 	| { id: string; type: string };
 
 export interface LineWebhookEvent {
-	type: "message" | "follow" | "unfollow" | "join" | "leave" | "postback" | string;
+	type:
+		| "message"
+		| "messageEdited"
+		| "unsend"
+		| "follow"
+		| "unfollow"
+		| "join"
+		| "leave"
+		| "postback"
+		| string;
 	timestamp: number;
 	source: LineSource;
 	replyToken?: string;
 	webhookEventId?: string;
 	deliveryContext?: { isRedelivery: boolean };
+	/** Module channel 才會用到：standby 代表聊天控制權在別的 channel */
+	mode?: "active" | "standby";
+	/** Chat 開啟時 message 事件附帶；呼叫 markAsRead 用，沒有到期日 */
+	markAsReadToken?: string;
 	message?: LineMessageContent;
 	postback?: { data: string; params?: Record<string, string> };
+	unsend?: { messageId: string };
+}
+
+/** 從事件取出 markAsReadToken；官方放在事件層，這裡同時容忍放在 message 內的變體 */
+export function markAsReadTokenOf(event: LineWebhookEvent): string | null {
+	const inMessage = (event.message as { markAsReadToken?: string } | undefined)?.markAsReadToken;
+	return event.markAsReadToken ?? inMessage ?? null;
 }
 
 export interface LineWebhookBody {
@@ -374,6 +412,34 @@ export class LineClient {
 		if (!res.ok) {
 			throw new Error(`LINE reply failed (${res.status}): ${await res.text()}`);
 		}
+	}
+
+	/**
+	 * 把 token 對應的訊息與之前的訊息標為已讀。
+	 * 只有官方帳號 Chat 開啟（markAsReadMode = manual）時有效；token 無效回 400。
+	 */
+	async markAsRead(markAsReadToken: string): Promise<{ ok: boolean; status: number }> {
+		const res = await this.request("mark-as-read", `${LINE_API}/chat/markAsRead`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ markAsReadToken }),
+		});
+		return { ok: res.ok, status: res.status };
+	}
+
+	/** 官方帳號基本資料，含 chatMode / markAsReadMode，用來確認已讀模式設定是否如預期 */
+	async getBotInfo(): Promise<LineBotInfo | null> {
+		const res = await this.request("bot-info", `${LINE_API}/info`);
+		if (!res.ok) return null;
+		const data = (await res.json()) as Partial<LineBotInfo>;
+		return {
+			userId: data.userId ?? "",
+			basicId: data.basicId ?? "",
+			displayName: data.displayName ?? "",
+			pictureUrl: data.pictureUrl ?? null,
+			chatMode: data.chatMode === "chat" ? "chat" : "bot",
+			markAsReadMode: data.markAsReadMode === "manual" ? "manual" : "auto",
+		};
 	}
 
 	/** 下載使用者傳來的圖片／影片／語音／檔案 */
