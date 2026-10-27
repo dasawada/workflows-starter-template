@@ -8,7 +8,13 @@
 - **逾時提醒**：Cloudflare Workflows 監看每個對話，客服超過 `REPLY_SLA_MINUTES` 未回覆就標記「逾時」並推播
 - **互動訊息編輯台**：不用懂 JSON，用表單組合「文字／是否確認／按鈕卡／輪播卡／資訊卡（Flex）」與快速回覆小圓鈕，每個欄位都內建 LINE 的字數與數量上限，送出前自動檢查；範本在 `src/builder/presets.ts`。進階使用者可切到 JSON 模式直接改（範例在 `src/presets.ts`）。所有 postback 按鈕送出時會自動加上追蹤 id，使用者點選後以 postback 回到 webhook，結果寫入 D1 的 `prompts` 與 `prompt_responses`，客服台即時顯示並可匯出 CSV
 - **自動歡迎**：使用者加好友時用 reply token 送 `WELCOME_MESSAGE`
-- **群組／多人聊天室**：以群組為對話單位，訊息會標示發言者
+- **群組／多人聊天室**：以群組為對話單位，訊息會標示發言者（名稱拿不到時保留 userId）
+- **對話完整性**：引用訊息（`quotedMessageId`）快照與「原文無法取得」標示、撤回（`unsend`）、群組編輯（`messageEdited`）、圖集（`imageSet`）、LINE 重送標記；客服打開對話時呼叫 `markAsRead`（需官方帳號 Chat 開啟）
+- **發訊 outbox**：客服訊息先寫 D1 再帶 `X-Line-Retry-Key` 推送；送出中／失敗／結果不明都看得到，排程自動補推，失敗可重試；同一把 `clientKey` 重送不會重複推給 LINE
+- **完整性中心**：缺口紀錄（引用找不到原文、附件過期、發送失敗、LINE 重送、事件處理放棄、Chat 模式、客服回報、匯入）、同步健康狀態、「回報缺失」；排程（cron 每 5 分鐘）補推、補抓附件、刷新官方帳號設定
+- **歷史匯入**：LINE 官方帳號管理後台的聊天紀錄 CSV，自動偵測欄位、以名稱配對對話、重複匯入冪等、配不到的列人工指派；匯入的訊息標示「匯入紀錄」
+- **通知型訊息（PNP）**：以電話號碼發送（需向 LINE 申請開通），中央發送紀錄 + `X-Line-Delivery-Tag` 對應 `delivery` 事件
+- **多客服協作**：客服名稱、接手／交還、誰正在看同一個對話、回覆衝突偵測（別人接手中或在你之後已回覆 → 409，可確認後強制送出）
 
 渠道層（`worker/line.ts`、`worker/webhook-line.ts`）與資料層（`worker/db.ts`）分離，`conversations.channel` 已預留 `teams`，之後可用同一套客服台接 Microsoft Teams。
 
@@ -30,6 +36,11 @@ LINE 平台 ──POST /webhook/line──▶ Worker ──▶ D1 (conversations
 | `worker/db.ts` | D1 存取層 |
 | `worker/inbox-do.ts` | WebSocket 廣播用 Durable Object |
 | `worker/workflow.ts` | 逾時未回覆提醒 Workflow |
+| `worker/outbox.ts` | 客服發訊 outbox：retry key、送達狀態、衝突偵測 |
+| `worker/integrity.ts` | 缺口紀錄、健康狀態、排程維護 |
+| `worker/media.ts` | 附件下載與重試、過期判定 |
+| `worker/import-csv.ts` | 官方後台 CSV 匯入 |
+| `worker/pnp.ts` | 通知型訊息發送紀錄與送達事件 |
 | `migrations/` | D1 schema |
 | `shared/types.ts` | 前後端共用型別 |
 | `src/` | React 客服台 |
@@ -67,7 +78,7 @@ npm run dev                      # http://localhost:5173，只看 UI 排版
    | Production branch | `main` |
    | Build command | `npm run build` |
    | Deploy command | `npm run deploy`（預設值即可，會呼叫 `scripts/bootstrap.sh`） |
-3. 按 Save and Deploy。`scripts/bootstrap.sh` 會自動建立 D1（`cs-console-db`）與 R2（`cs-console-media`）、套用 schema、部署；若建置環境無權建立資源，先在 dashboard 手動建好同名資源再重跑。
+3. 按 Save and Deploy。`scripts/bootstrap.sh` 會自動建立 D1（`cs-console-db`）、R2（`cs-console-media`）與 Queues（`cs-console-line-events`、`cs-console-line-events-dlq`，需 Workers Paid；建不出來會自動改 inline 模式）、套用 schema、部署；若建置環境無權建立資源，先在 dashboard 手動建好同名資源再重跑。`wrangler.jsonc` 的 `triggers.crons` 會註冊每 5 分鐘的排程維護，DLQ 也有 consumer（失敗事件記成缺口）。
 4. 部署完成後到 **該 Worker → Settings → Variables and Secrets**，新增三個 Secret：`LINE_CHANNEL_SECRET`、`LINE_CHANNEL_ACCESS_TOKEN`、`CONSOLE_TOKEN`。
 
 之後每次 push 到 `main` 都會自動建置部署。
@@ -78,6 +89,8 @@ npm run dev                      # http://localhost:5173，只看 UI 排版
 
 1. **Messaging API → Webhook URL** 填 `https://<你的 worker 網址>/webhook/line`，按 Verify，開啟 **Use webhook**
 2. 關閉 **Auto-reply messages**（否則 LINE 會用官方帳號的罐頭訊息搶先回覆）
+3. 要讓使用者看到「已讀」，官方帳號管理後台的 **Chat（聊天）必須開啟**；客服台「完整性」頁會顯示目前的 `chatMode` / `markAsReadMode`
+4. 通知型訊息（PNP）需另外向 LINE 申請；未開通時發送會失敗並顯示原因
 3. 關閉 **Greeting message**（由本系統的 `WELCOME_MESSAGE` 取代；想用 LINE 內建的就把 `WELCOME_MESSAGE` 留空）
 
 打開 worker 網址，用 `CONSOLE_TOKEN` 登入即可。

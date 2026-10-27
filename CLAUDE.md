@@ -38,6 +38,12 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 | `worker/inbox-do.ts` | 單一實例 `InboxDO`（名稱固定 `"inbox"`），WebSocket 廣播 |
 | `worker/workflow.ts` | `ReplyReminderWorkflow` 逾時提醒 |
 | `worker/metrics.ts` | Analytics Engine 指標（`recordMetric` / `timed`），寫入失敗一律吞掉 |
+| `worker/outbox.ts` | 客服發訊唯一入口 `sendOutbound`：先寫 D1（pending）再帶 `X-Line-Retry-Key` 推送；`detectConflict` 做接手／後到回覆的 409 |
+| `worker/integrity.ts` | 缺口紀錄 `recordIntegrity`（dedupeKey 合併計數）、健康狀態、`runMaintenance`（cron 每 5 分鐘與 `POST /api/integrity/maintenance`） |
+| `worker/media.ts` | 附件下載 `storeMedia`：404/410 → expired 記缺口；其他失敗 → failed 由排程重試到 5 次 |
+| `worker/import-csv.ts` | 官方後台 CSV：解析、欄位偵測、名稱配對、冪等寫入、未配對列指派 |
+| `worker/pnp.ts` | 通知型訊息：電話號碼只存 SHA-256 與遮罩，`X-Line-Delivery-Tag` = notification id |
+| `worker/line-env.ts` | `lineClientFor(env)`，避免 webhook / integrity / outbox 互相循環引用 |
 | `src/builder/` | 傻瓜編輯台的核心：`limits.ts`（LINE 上限，所有欄位以此為準）、`types.ts`（草稿結構）、`toLine.ts`（草稿→LINE JSON，輸出必定合法；`validateDraft` 列出必填缺漏）、`presets.ts`（表單範本） |
 | `src/components/builder/` | 編輯台 UI：`BuilderDialog`（主畫面）、`MessageForm`（各類型表單）、`ActionEditor`（按鈕）、`fields.tsx`（含字數計數的輸入框） |
 | `src/presets.ts` | JSON 模式的範例（LINE 訊息陣列），給進階使用者 |
@@ -72,7 +78,11 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 - Queues 只在 Workers Paid 提供。`scripts/bootstrap.sh` 建不出 queue 時會改寫 dist 內的部署設定（移除 `queues`、`WEBHOOK_MODE=inline`），程式端以 `env.LINE_EVENTS` 是否存在再保險一次。`wrangler.jsonc` 本身保持 queue 設定。
 - 正式環境的 Worker `workflows-starter-template` 曾部署過原始範本，舊的 Workflow `my-workflow` 可能殘留在 dashboard，不影響運作，可手動刪除。
 - `test/reminder.test.ts` 會印一行 `WorkflowTimeoutError` 的 uncaught exception，來自測試工具 `forceEventTimeout` 內部，測試本身通過，可忽略。
-- 客服台目前為單一共用 `CONSOLE_TOKEN`，無個別帳號。
+- 客服台目前為單一共用 `CONSOLE_TOKEN`，無個別帳號。客服名稱由前端以 `X-Agent-Name`（URI 編碼）自報，只用於接手／在看／衝突偵測／署名，不是身分驗證。
+- 客服發訊一律走 `worker/outbox.ts`，不要在別處直接呼叫 `client.push`。`delivery_status`：pending（排程會重推，LINE 回 409 視為已送達）／sent／failed（4xx，客服可重試）／unknown（超過 24 小時，記 `send_unknown` 缺口）。
+- 缺口紀錄 `integrity_events` 用 `dedupe_key` 合併（`ON CONFLICT(dedupe_key) WHERE dedupe_key IS NOT NULL`），重送以小時為桶。DLQ consumer 把放棄的事件連原始 payload 記成 `event_dead_lettered`。
+- CSV 匯入的訊息 `source = manager_csv`、`external_id = csv:<hash>`，不動未讀與逾時；與 webhook 已收到的訊息以「同一分鐘 + 同文字」視為重複。官方 CSV 的實際欄位名稱尚未以真實檔案驗證，欄位偵測靠關鍵字，偵測不到時前端要求指定。
+- PNP 的 `to` 是 E.164（含 `+`）的 SHA-256 hex，端點 `POST https://api.line.me/bot/pnp/push`；是否含 `+` 與實際回應格式尚未在正式環境驗證。
 - 一般回覆只能純文字，圖片／Flex Message 發送尚未做。
 - 對話完整性（migration 0005）：`quotedMessageId` 在收訊時以 `findMessageByExternalId` 做快照存進 `metadata.quote`，找不到原文時 `messageId: null`，前端明示「無法取得」；`unsend` 清掉 text／media／R2 物件並設 `unsent_at`；`messageEdited`（目前僅群組文字訊息）以同一個 LINE message id 更新 text、第一版留在 `metadata.originalText`，只接受 timestamp 較新的版本；`imageSet`、`senderUserId`、`isRedelivery` 原樣存 metadata。
 - 已讀：使用者訊息的 `markAsReadToken` 存在 `conversations.mark_as_read_token`，客服 `POST /read` 時呼叫 `POST /v2/bot/chat/markAsRead`，成功才清掉 token。只有官方帳號 Chat 開啟（`GET /api/line/info` 的 `markAsReadMode = manual`）才有效，Chat 關閉時 LINE 回 400、客服台照常。`messageEdited` 的事件結構與 `markAsReadToken` 的位置是依文件寫的，正式環境第一次收到時用 `npx wrangler tail` 核對。

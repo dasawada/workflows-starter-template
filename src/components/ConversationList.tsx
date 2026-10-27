@@ -167,6 +167,11 @@ const Row = memo(function Row({ conversation: c, selected, top, onSelect }: RowP
 								已結案
 							</span>
 						)}
+						{c.assignedTo && (
+							<span title={`${c.assignedTo} 接手中`} className="shrink-0 max-w-16 truncate text-[10px] px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-300">
+								{c.assignedTo}
+							</span>
+						)}
 						<span className="ml-auto shrink-0 text-[11px] text-neutral-400">{formatListTime(c.lastMessageAt)}</span>
 					</div>
 					<div className="flex items-center gap-2 mt-0.5">

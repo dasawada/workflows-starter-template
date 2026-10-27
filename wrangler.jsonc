@@ -18,6 +18,12 @@
 		"enabled": true
 	},
 	/**
+	 * 排程維護（worker/integrity.ts runMaintenance）：補推送出中的客服訊息、補抓附件、刷新官方帳號設定
+	 */
+	"triggers": {
+		"crons": ["*/5 * * * *"]
+	},
+	/**
 	 * Smart Placement：讓 Worker 搬到 D1 旁執行，一次請求做多次查詢時省掉跨區往返
 	 */
 	"placement": {
@@ -53,6 +59,13 @@
 				"max_batch_timeout": 1,
 				"max_retries": 3,
 				"dead_letter_queue": "cs-console-line-events-dlq"
+			},
+			{
+				// 重試 3 次仍失敗的事件：記成缺口（含原始事件），不再重試
+				"queue": "cs-console-line-events-dlq",
+				"max_batch_size": 20,
+				"max_batch_timeout": 5,
+				"max_retries": 1
 			}
 		]
 	},

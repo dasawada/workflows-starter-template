@@ -5,9 +5,11 @@ import { LinePreview } from "./LinePreview";
 
 interface Props {
 	message: Message;
+	/** 送出失敗／不明的客服訊息可重推 */
+	onRetry?: (messageId: string) => void;
 }
 
-export function MessageBubble({ message }: Props) {
+export function MessageBubble({ message, onRetry }: Props) {
 	if (message.sender === "system") {
 		return (
 			<div className="flex justify-center my-2">
@@ -24,12 +26,16 @@ export function MessageBubble({ message }: Props) {
 		(message.metadata?.senderUserId as string | undefined);
 	const quote = message.unsentAt ? null : (message.metadata?.quote as MessageQuote | undefined);
 	const imageSet = message.metadata?.imageSet as { index: number; total: number } | undefined;
+	const imported = message.source === "manager_csv";
 
 	return (
 		<div className={`flex ${mine ? "justify-end" : "justify-start"} my-1`}>
 			<div className={`max-w-[75%] flex flex-col ${mine ? "items-end" : "items-start"}`}>
 				{!mine && senderName && (
 					<span className="text-[11px] text-neutral-500 mb-0.5 px-1">{senderName}</span>
+				)}
+				{mine && message.agentName && (
+					<span className="text-[11px] text-neutral-500 mb-0.5 px-1">{message.agentName}</span>
 				)}
 				<div
 					className={`rounded-2xl px-3.5 py-2 text-sm whitespace-pre-wrap break-words ${
@@ -43,14 +49,56 @@ export function MessageBubble({ message }: Props) {
 					{quote && <QuoteBlock quote={quote} mine={mine} />}
 					{message.unsentAt ? <>此訊息已被使用者撤回</> : <Content message={message} />}
 				</div>
-				<span className="text-[10px] text-neutral-400 mt-0.5 px-1">
+				<span className="text-[10px] text-neutral-400 mt-0.5 px-1 flex items-center gap-1">
 					{formatTime(message.createdAt)}
 					{imageSet && ` · 第 ${imageSet.index}/${imageSet.total} 張`}
 					{message.editedAt && !message.unsentAt && " · 已編輯"}
+					{imported && (
+						<span title="來自官方後台 CSV 匯入，非 webhook 即時紀錄，可信度不同" className="px-1 rounded bg-neutral-200 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-300">
+							匯入紀錄
+						</span>
+					)}
+					{mine && <DeliveryBadge message={message} onRetry={onRetry} />}
 				</span>
 			</div>
 		</div>
 	);
+}
+
+/**
+ * 送達狀態：只顯示有證據的狀態。sent = LINE 已接受（不等於使用者已讀，LINE 沒有這個 API）。
+ */
+function DeliveryBadge({ message, onRetry }: { message: Message; onRetry?: (id: string) => void }) {
+	switch (message.deliveryStatus) {
+		case "sent":
+			return <span title="LINE 已接受這則訊息（無法得知使用者是否已讀）">· ✓ 已送出</span>;
+		case "pending":
+			return <span className="text-amber-600 dark:text-amber-400" title="尚未收到 LINE 確認，系統會自動重試">· ⏳ 送出中</span>;
+		case "failed":
+			return (
+				<span className="text-red-600 dark:text-red-400" title={String(message.metadata?.deliveryError ?? "")}>
+					· ✗ 送出失敗
+					{onRetry && (
+						<button onClick={() => onRetry(message.id)} className="ml-1 underline">
+							重試
+						</button>
+					)}
+				</span>
+			);
+		case "unknown":
+			return (
+				<span className="text-red-600 dark:text-red-400" title="超過 24 小時無法確認 LINE 是否送出，請向使用者確認">
+					· ? 結果不明
+					{onRetry && (
+						<button onClick={() => onRetry(message.id)} className="ml-1 underline">
+							重試
+						</button>
+					)}
+				</span>
+			);
+		default:
+			return null;
+	}
 }
 
 /**
@@ -88,6 +136,17 @@ function QuoteBlock({ quote, mine }: { quote: MessageQuote; mine: boolean }) {
 			<div className="line-clamp-3 opacity-90">{preview}</div>
 		</div>
 	);
+}
+
+/** 附件還沒有、或永遠拿不到時，要說清楚是哪一種 */
+function MediaPending({ message, label }: { message: Message; label: string }) {
+	if (message.mediaStatus === "expired") {
+		return <span className="italic opacity-70">{label}已超過 LINE 保留期限，無法取得</span>;
+	}
+	if (message.mediaStatus === "failed") {
+		return <span className="italic opacity-70">{label}下載失敗，系統會再嘗試</span>;
+	}
+	return <span className="italic opacity-70">{label}下載中…</span>;
 }
 
 function Content({ message }: { message: Message }) {
@@ -143,21 +202,21 @@ function Content({ message }: { message: Message }) {
 					/>
 				</a>
 			) : (
-				<span className="italic opacity-70">圖片下載中…</span>
+				<MediaPending message={message} label="圖片" />
 			);
 
 		case "video":
 			return mediaSrc ? (
 				<video src={mediaSrc} controls className="max-w-full max-h-72 rounded-lg -mx-1.5 -my-0.5" />
 			) : (
-				<span className="italic opacity-70">影片下載中…</span>
+				<MediaPending message={message} label="影片" />
 			);
 
 		case "audio":
 			return mediaSrc ? (
 				<audio src={mediaSrc} controls className="max-w-full" />
 			) : (
-				<span className="italic opacity-70">語音下載中…</span>
+				<MediaPending message={message} label="語音" />
 			);
 
 		case "file": {
@@ -169,7 +228,7 @@ function Content({ message }: { message: Message }) {
 					{size && <span className="opacity-70"> ({size})</span>}
 				</a>
 			) : (
-				<span className="italic opacity-70">📎 {name} 下載中…</span>
+				<MediaPending message={message} label={`📎 ${name}`} />
 			);
 		}
 

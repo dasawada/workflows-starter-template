@@ -3,6 +3,7 @@ import type {
 	Conversation,
 	ConversationStatus,
 	InboxEvent,
+	IntegrityEvent,
 	Message,
 	Prompt,
 	PromptStatus,
@@ -10,6 +11,7 @@ import type {
 	Stats,
 } from "../shared/types";
 import { api, ApiError, getToken, setToken } from "./api";
+import { getAgentName, setAgentName } from "./agent";
 import { useInboxSocket } from "./hooks/useInboxSocket";
 import { Login } from "./components/Login";
 import { ConversationList } from "./components/ConversationList";
@@ -17,6 +19,9 @@ import { MessageThread } from "./components/MessageThread";
 import { ComposeDialog } from "./components/ComposeDialog";
 import { BuilderDialog } from "./components/builder/BuilderDialog";
 import { PromptsPanel } from "./components/PromptsPanel";
+import { IntegrityPanel } from "./components/IntegrityPanel";
+import { ImportPanel } from "./components/ImportPanel";
+import { NotificationsPanel } from "./components/NotificationsPanel";
 
 const PAGE_SIZE = 50;
 /** 對話清單每頁筆數與記憶體上限；清單用虛擬捲動，所以上限只影響記憶體不影響效能 */
@@ -24,9 +29,11 @@ const LIST_PAGE = 50;
 const LIST_CAP = 1000;
 
 type AuthState = "checking" | "anonymous" | "authed";
+type Panel = null | "prompts" | "integrity" | "imports" | "notifications";
 
 function App() {
-	const [auth, setAuth] = useState<AuthState>(getToken() ? "checking" : "anonymous");
+	const [auth, setAuth] = useState<AuthState>(getToken() && getAgentName() ? "checking" : "anonymous");
+	const [agentName, setAgent] = useState<string | null>(getAgentName());
 	const [loginError, setLoginError] = useState<string | null>(null);
 	const [loginBusy, setLoginBusy] = useState(false);
 
@@ -51,7 +58,16 @@ function App() {
 
 	const [composeMode, setComposeMode] = useState<"closed" | "builder" | "json">("closed");
 	const [jsonSeed, setJsonSeed] = useState<unknown[] | undefined>(undefined);
-	const [promptsPanelOpen, setPromptsPanelOpen] = useState(false);
+	const [panel, setPanel] = useState<Panel>(null);
+	const promptsPanelOpen = panel === "prompts";
+	const setPromptsPanelOpen = (open: boolean) => setPanel(open ? "prompts" : null);
+	/** 完整性事件／通知更新時遞增，讓面板重抓 */
+	const [integrityKey, setIntegrityKey] = useState(0);
+	const [notificationKey, setNotificationKey] = useState(0);
+	const [openGaps, setOpenGaps] = useState(0);
+	/** 目前對話的在看客服與未解決缺口 */
+	const [viewers, setViewers] = useState<string[]>([]);
+	const [gaps, setGaps] = useState<IntegrityEvent[]>([]);
 	const [prompts, setPrompts] = useState<Prompt[]>([]);
 	const [promptsLoading, setPromptsLoading] = useState(false);
 	const [promptsFilter, setPromptsFilter] = useState<PromptStatus | "all">("all");
@@ -68,10 +84,12 @@ function App() {
 			});
 	}, [auth]);
 
-	const handleLogin = async (token: string) => {
+	const handleLogin = async (token: string, name: string) => {
 		setLoginBusy(true);
 		setLoginError(null);
 		setToken(token);
+		setAgentName(name);
+		setAgent(name);
 		try {
 			await api.me();
 			setAuth("authed");
@@ -133,6 +151,7 @@ function App() {
 
 	const refreshStats = useCallback(() => {
 		api.stats().then(setStats).catch(() => {});
+		api.integrityHealth().then((h) => setOpenGaps(h.openTotal)).catch(() => {});
 	}, []);
 
 	// 事件很多時統計只每秒更新一次
@@ -210,6 +229,11 @@ function App() {
 			})
 			.catch(() => {});
 
+		setGaps([]);
+		setViewers([]);
+		api.conversationIntegrity(selectedId).then(({ events }) => !cancelled && setGaps(events)).catch(() => {});
+		api.presence(selectedId).then(({ agents }) => !cancelled && setViewers(agents)).catch(() => {});
+
 		return () => {
 			cancelled = true;
 		};
@@ -265,12 +289,31 @@ function App() {
 					if (!matches) return rest;
 					return [event.prompt, ...rest].sort((a, b) => b.createdAt - a.createdAt);
 				});
+			} else if (event.type === "presence.updated") {
+				if (event.conversationId === selectedId) setViewers(event.agents);
+			} else if (event.type === "integrity.updated") {
+				setIntegrityKey((k) => k + 1);
+				scheduleStats();
+				if (event.event.conversationId === selectedId) {
+					setGaps((prev) => {
+						const rest = prev.filter((g) => g.id !== event.event.id);
+						return event.event.status === "open" ? [event.event, ...rest] : rest;
+					});
+				}
+			} else if (event.type === "notification.updated") {
+				setNotificationKey((k) => k + 1);
 			}
 		},
 		[selectedId, upsertConversation, promptsFilter, scheduleStats],
 	);
 
-	const { connected } = useInboxSocket(auth === "authed", onEvent);
+	const { connected, send: sendSocket } = useInboxSocket(auth === "authed", onEvent);
+
+	// 告訴其他客服我正在看哪個對話（重連後 hook 會自動重送）
+	useEffect(() => {
+		if (auth !== "authed") return;
+		sendSocket({ type: "view", conversationId: selectedId, agent: agentName });
+	}, [auth, selectedId, agentName, sendSocket]);
 
 	// 重連後重新抓一次清單與統計，補上斷線期間漏掉的更新
 	useEffect(() => {
@@ -283,21 +326,117 @@ function App() {
 	// ---------- 操作 ----------
 	const selectConversation = useCallback((id: string | null) => {
 		setSelectedId(id);
-		setSelected(id ? (conversationsRef.current.find((c) => c.id === id) ?? null) : null);
+		const known = id ? (conversationsRef.current.find((c) => c.id === id) ?? null) : null;
+		setSelected(known);
+		// 從完整性中心／追蹤訊息跳過來的對話可能不在目前載入的清單裡，用 external id 搜一次
+		if (id && !known) {
+			const externalId = id.split(":").pop() ?? id;
+			api
+				.listConversations({ status: "all", q: externalId, limit: 5 })
+				.then(({ conversations }) => {
+					const found = conversations.find((c) => c.id === id);
+					if (found) setSelected((prev) => prev ?? found);
+				})
+				.catch(() => {});
+		}
 	}, []);
 
-	const handleSend = async (text: string) => {
+	const mergeMessage = useCallback((message: Message) => {
+		setMessages((prev) => {
+			const idx = prev.findIndex((m) => m.id === message.id);
+			if (idx < 0) return [...prev, message];
+			const next = prev.slice();
+			next[idx] = message;
+			return next;
+		});
+	}, []);
+
+	/** 送出時附上畫面上最後一則訊息，伺服器用它判斷有沒有其他客服在這之後回覆 */
+	const lastSeenMessageId = () => messages[messages.length - 1]?.id;
+
+	const handleSend = async (text: string, force: boolean) => {
 		if (!selectedId) return;
-		const { message, conversation } = await api.reply(selectedId, text);
-		setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
-		upsertConversation(conversation);
+		try {
+			const { message, conversation } = await api.reply(selectedId, {
+				text,
+				force,
+				clientKey: crypto.randomUUID(),
+				lastSeenMessageId: lastSeenMessageId(),
+			});
+			mergeMessage(message);
+			upsertConversation(conversation);
+		} catch (err) {
+			// 502：訊息已寫入但 LINE 拒絕，先放進畫面讓客服看到失敗狀態與重試
+			if (err instanceof ApiError && err.status === 502 && err.data?.message) {
+				mergeMessage(err.data.message as Message);
+				if (err.data.conversation) upsertConversation(err.data.conversation as Conversation);
+			}
+			throw err;
+		}
 	};
 
 	const handleSendMessages = async (input: SendMessagesInput) => {
 		if (!selectedId) return;
-		const { message, conversation } = await api.sendMessages(selectedId, input);
-		setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
+		try {
+			const { message, conversation } = await api.sendMessages(selectedId, {
+				...input,
+				clientKey: input.clientKey ?? crypto.randomUUID(),
+				lastSeenMessageId: lastSeenMessageId(),
+			});
+			mergeMessage(message);
+			upsertConversation(conversation);
+		} catch (err) {
+			if (err instanceof ApiError && err.status === 502 && err.data?.message) {
+				mergeMessage(err.data.message as Message);
+			}
+			if (err instanceof ApiError && err.status === 409) {
+				// 互動訊息對話框沒有衝突確認 UI：直接用 force 再送一次前先問
+				const data = err.data as { error?: string } | null;
+				if (window.confirm(`${data?.error ?? "有衝突"}\n仍要送出嗎？`)) {
+					const { message, conversation } = await api.sendMessages(selectedId, { ...input, force: true, clientKey: crypto.randomUUID() });
+					mergeMessage(message);
+					upsertConversation(conversation);
+					return;
+				}
+			}
+			throw err;
+		}
+	};
+
+	const handleRetryMessage = async (messageId: string) => {
+		try {
+			const { message } = await api.retryMessage(messageId);
+			mergeMessage(message);
+		} catch (err) {
+			if (err instanceof ApiError && err.data?.message) mergeMessage(err.data.message as Message);
+		}
+	};
+
+	const handleAssign = async () => {
+		if (!selectedId) return;
+		const { conversation } = await api.assign(selectedId);
 		upsertConversation(conversation);
+	};
+
+	const handleRelease = async () => {
+		if (!selectedId) return;
+		const { conversation } = await api.release(selectedId);
+		upsertConversation(conversation);
+	};
+
+	const handleReportGap = async (note: string) => {
+		if (!selectedId) return;
+		const { events } = await api.reportGap({ conversationId: selectedId, note });
+		setGaps(events);
+	};
+
+	const changeAgentName = () => {
+		const next = window.prompt("你的名字（同事會看到）", agentName ?? "");
+		if (next === null) return;
+		const name = next.trim().slice(0, 40);
+		if (!name) return;
+		setAgentName(name);
+		setAgent(name);
 	};
 
 	const loadPrompts = useCallback(async (status: PromptStatus | "all") => {
@@ -330,7 +469,7 @@ function App() {
 		);
 	}
 	if (auth === "anonymous") {
-		return <Login error={loginError} busy={loginBusy} onSubmit={handleLogin} />;
+		return <Login error={loginError} busy={loginBusy} initialName={agentName} onSubmit={handleLogin} />;
 	}
 
 	const totalUnread = stats?.unreadTotal ?? 0;
@@ -349,18 +488,40 @@ function App() {
 						逾時 {stats!.needsAttentionCount}
 					</span>
 				)}
+				{(
+					[
+						["prompts", "追蹤訊息", 0],
+						["integrity", "完整性", openGaps],
+						["imports", "匯入", 0],
+						["notifications", "通知", 0],
+					] as [Panel, string, number][]
+				).map(([key, label, badge]) => (
+					<button
+						key={key}
+						onClick={() => setPanel(panel === key ? null : key)}
+						className={`text-xs px-2.5 py-1 rounded-md flex items-center gap-1 ${
+							panel === key
+								? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
+								: "text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+						}`}
+					>
+						{label}
+						{badge > 0 && (
+							<span className="text-[10px] px-1 rounded-full bg-amber-500 text-white font-semibold" title="未處理的資料缺口">
+								{badge > 99 ? "99+" : badge}
+							</span>
+						)}
+					</button>
+				))}
 				<button
-					onClick={() => setPromptsPanelOpen((v) => !v)}
-					className={`text-xs px-2.5 py-1 rounded-md ${
-						promptsPanelOpen
-							? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
-							: "text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-					}`}
+					onClick={changeAgentName}
+					title="更改你的名字"
+					className="ml-auto text-[11px] text-neutral-600 dark:text-neutral-300 hover:underline"
 				>
-					追蹤訊息
+					{agentName ?? "未設定名字"}
 				</button>
 				<span
-					className={`ml-auto flex items-center gap-1.5 text-[11px] ${
+					className={`flex items-center gap-1.5 text-[11px] ${
 						connected ? "text-emerald-600" : "text-amber-600"
 					}`}
 				>
@@ -400,7 +561,7 @@ function App() {
 					/>
 				</aside>
 
-				<main className={`flex-1 min-w-0 ${selectedId || promptsPanelOpen ? "block" : "hidden lg:block"}`}>
+				<main className={`flex-1 min-w-0 ${selectedId || panel ? "block" : "hidden lg:block"}`}>
 					{promptsPanelOpen ? (
 						<PromptsPanel
 							prompts={prompts}
@@ -412,16 +573,43 @@ function App() {
 							}}
 							onClose={() => setPromptsPanelOpen(false)}
 						/>
+					) : panel === "integrity" ? (
+						<IntegrityPanel
+							refreshKey={integrityKey}
+							onOpenConversation={(id) => {
+								setPanel(null);
+								selectConversation(id);
+							}}
+							onClose={() => setPanel(null)}
+						/>
+					) : panel === "imports" ? (
+						<ImportPanel
+							onOpenConversation={(id) => {
+								setPanel(null);
+								selectConversation(id);
+							}}
+							onClose={() => setPanel(null)}
+						/>
+					) : panel === "notifications" ? (
+						<NotificationsPanel refreshKey={notificationKey} onClose={() => setPanel(null)} />
 					) : selected ? (
 						<MessageThread
 							conversation={selected}
 							messages={messages}
 							loading={messagesLoading}
 							hasMore={hasMore}
+							agentName={agentName}
+							viewers={viewers}
+							gaps={gaps}
 							onLoadMore={() => void loadMore()}
 							onSend={handleSend}
 							onOpenPrompt={() => setComposeMode("builder")}
 							onToggleStatus={() => void handleToggleStatus()}
+							onAssign={() => void handleAssign()}
+							onRelease={() => void handleRelease()}
+							onRetryMessage={(id) => void handleRetryMessage(id)}
+							onReportGap={handleReportGap}
+							onOpenIntegrity={() => setPanel("integrity")}
 							onBack={() => selectConversation(null)}
 						/>
 					) : (

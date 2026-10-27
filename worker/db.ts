@@ -1,10 +1,22 @@
 import type {
 	Conversation,
 	ConversationStatus,
+	DeliveryStatus,
+	ImportBatch,
+	ImportReport,
+	ImportRowGroup,
+	IntegrityEvent,
+	IntegrityKind,
+	IntegritySeverity,
+	IntegrityStatus,
+	MediaStatus,
 	Message,
+	MessageSource,
 	MessageType,
 	MessageSender,
 	MessageDirection,
+	Notification,
+	NotificationStatus,
 	Prompt,
 	PromptOption,
 	PromptStatus,
@@ -30,6 +42,8 @@ interface ConversationRow {
 	needs_attention: number;
 	reminder_instance_id: string | null;
 	mark_as_read_token: string | null;
+	assigned_to: string | null;
+	assigned_at: number | null;
 	created_at: number;
 	updated_at: number;
 }
@@ -48,6 +62,11 @@ interface MessageRow {
 	created_at: number;
 	edited_at: number | null;
 	unsent_at: number | null;
+	source: string | null;
+	delivery_status: string | null;
+	retry_key: string | null;
+	media_status: string | null;
+	agent_name: string | null;
 }
 
 function toConversation(row: ConversationRow): Conversation {
@@ -64,6 +83,8 @@ function toConversation(row: ConversationRow): Conversation {
 		lastOutboundAt: row.last_outbound_at,
 		unreadCount: row.unread_count,
 		needsAttention: row.needs_attention === 1,
+		assignedTo: row.assigned_to ?? null,
+		assignedAt: row.assigned_at ?? null,
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
 	};
@@ -92,6 +113,10 @@ function toMessage(row: MessageRow): Message {
 		createdAt: row.created_at,
 		editedAt: row.edited_at ?? null,
 		unsentAt: row.unsent_at ?? null,
+		source: (row.source as MessageSource) ?? "line_webhook",
+		deliveryStatus: (row.delivery_status as DeliveryStatus) ?? null,
+		mediaStatus: (row.media_status as MediaStatus) ?? null,
+		agentName: row.agent_name ?? null,
 	};
 }
 
@@ -244,6 +269,13 @@ export interface NewMessageInput {
 	createdAt: number;
 	/** 使用者訊息附的 markAsReadToken，記在對話上供客服讀過後呼叫已讀 API */
 	markAsReadToken?: string | null;
+	source?: MessageSource;
+	deliveryStatus?: DeliveryStatus | null;
+	retryKey?: string | null;
+	mediaStatus?: MediaStatus | null;
+	agentName?: string | null;
+	/** 只寫時間軸、不動對話的未讀／最後訊息／逾時狀態（接手紀錄之類的系統註記） */
+	silent?: boolean;
 }
 
 /** 對話清單上顯示的預覽文字 */
@@ -280,8 +312,9 @@ export async function insertMessage(
 	const insert = db
 		.prepare(
 			`INSERT OR IGNORE INTO messages
-			 (id, conversation_id, direction, sender, type, text, media_key, media_content_type, metadata, external_id, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 (id, conversation_id, direction, sender, type, text, media_key, media_content_type, metadata, external_id, created_at,
+			  source, delivery_status, retry_key, media_status, agent_name)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 		.bind(
 			input.id,
@@ -295,9 +328,18 @@ export async function insertMessage(
 			input.metadata ? JSON.stringify(input.metadata) : null,
 			input.externalId ?? null,
 			input.createdAt,
+			input.source ?? (input.sender === "system" ? "system" : isInbound ? "line_webhook" : "console"),
+			input.deliveryStatus ?? null,
+			input.retryKey ?? null,
+			input.mediaStatus ?? null,
+			input.agentName ?? null,
 		);
 
-	const update = isInbound
+	const update = input.silent
+		? db
+				.prepare("UPDATE conversations SET updated_at = ? WHERE id = ? AND EXISTS (SELECT 1 FROM messages WHERE id = ?)")
+				.bind(input.createdAt, input.conversationId, input.id)
+		: isInbound
 		? db
 				.prepare(
 					`UPDATE conversations SET
@@ -356,7 +398,7 @@ export async function updateMessageMedia(
 ): Promise<Message | null> {
 	const results = await db.batch([
 		db
-			.prepare("UPDATE messages SET media_key = ?, media_content_type = ? WHERE id = ?")
+			.prepare("UPDATE messages SET media_key = ?, media_content_type = ?, media_status = 'stored' WHERE id = ?")
 			.bind(mediaKey, contentType, messageId),
 		db.prepare("SELECT * FROM messages WHERE id = ?").bind(messageId),
 	]);
@@ -737,4 +779,743 @@ export async function listPrompts(
 		.bind(...binds, limit)
 		.all<PromptRow>();
 	return results.map(toPrompt);
+}
+
+
+// ---------- 發訊 outbox：送達狀態與重試 ----------
+
+export async function findMessageByRetryKey(db: D1Database, retryKey: string): Promise<Message | null> {
+	const row = await db.prepare("SELECT * FROM messages WHERE retry_key = ?").bind(retryKey).first<MessageRow>();
+	return row ? toMessage(row) : null;
+}
+
+export async function getMessageRetryKey(db: D1Database, id: string): Promise<string | null> {
+	const row = await db.prepare("SELECT retry_key FROM messages WHERE id = ?").bind(id).first<{ retry_key: string | null }>();
+	return row?.retry_key ?? null;
+}
+
+export async function getMessage(db: D1Database, id: string): Promise<Message | null> {
+	const row = await db.prepare("SELECT * FROM messages WHERE id = ?").bind(id).first<MessageRow>();
+	return row ? toMessage(row) : null;
+}
+
+/** 更新客服訊息的送達狀態；失敗原因與 LINE request id 一併記進 metadata */
+export async function setDeliveryStatus(
+	db: D1Database,
+	messageId: string,
+	status: DeliveryStatus,
+	extra: { error?: string | null; lineRequestId?: string | null; lineStatus?: number | null } = {},
+): Promise<Message | null> {
+	const results = await db.batch([
+		db
+			.prepare(
+				`UPDATE messages SET delivery_status = ?,
+					metadata = json_set(COALESCE(metadata, '{}'),
+						'$.deliveryError', ?, '$.lineRequestId', ?, '$.lineStatus', ?, '$.deliveryUpdatedAt', ?)
+				 WHERE id = ?`,
+			)
+			.bind(status, extra.error ?? null, extra.lineRequestId ?? null, extra.lineStatus ?? null, Date.now(), messageId),
+		db.prepare("SELECT * FROM messages WHERE id = ?").bind(messageId),
+	]);
+	const row = firstRow<MessageRow>(results, 1);
+	return row ? toMessage(row) : null;
+}
+
+/** 排程用：送出中超過一段時間還沒確認的訊息 */
+export async function listPendingOutbound(db: D1Database, olderThan: number, limit = 50): Promise<Message[]> {
+	const { results } = await db
+		.prepare(
+			`SELECT * FROM messages WHERE delivery_status = 'pending' AND created_at < ?
+			 ORDER BY created_at LIMIT ?`,
+		)
+		.bind(olderThan, limit)
+		.all<MessageRow>();
+	return results.map(toMessage);
+}
+
+// ---------- 附件保存狀態 ----------
+
+export async function setMediaStatus(
+	db: D1Database,
+	messageId: string,
+	status: MediaStatus,
+	extra: { attempts?: number; error?: string | null } = {},
+): Promise<Message | null> {
+	const results = await db.batch([
+		db
+			.prepare(
+				`UPDATE messages SET media_status = ?,
+					metadata = json_set(COALESCE(metadata, '{}'), '$.mediaAttempts', ?, '$.mediaError', ?)
+				 WHERE id = ?`,
+			)
+			.bind(status, extra.attempts ?? 0, extra.error ?? null, messageId),
+		db.prepare("SELECT * FROM messages WHERE id = ?").bind(messageId),
+	]);
+	const row = firstRow<MessageRow>(results, 1);
+	return row ? toMessage(row) : null;
+}
+
+/** 排程用：還沒抓到或抓失敗的附件 */
+export async function listPendingMedia(db: D1Database, olderThan: number, limit = 20): Promise<Message[]> {
+	const { results } = await db
+		.prepare(
+			`SELECT * FROM messages WHERE media_status IN ('pending', 'failed') AND unsent_at IS NULL AND created_at < ?
+			 ORDER BY created_at LIMIT ?`,
+		)
+		.bind(olderThan, limit)
+		.all<MessageRow>();
+	return results.map(toMessage);
+}
+
+// ---------- 多客服 ----------
+
+export async function assignConversation(
+	db: D1Database,
+	conversationId: string,
+	agent: string | null,
+): Promise<Conversation | null> {
+	const now = Date.now();
+	const results = await db.batch([
+		db
+			.prepare("UPDATE conversations SET assigned_to = ?, assigned_at = ?, updated_at = ? WHERE id = ?")
+			.bind(agent, agent ? now : null, now, conversationId),
+		db.prepare("SELECT * FROM conversations WHERE id = ?").bind(conversationId),
+	]);
+	const row = firstRow<ConversationRow>(results, 1);
+	return row ? toConversation(row) : null;
+}
+
+/**
+ * 衝突偵測：客服送出時畫面上最後一則是 sinceMessageId，找出之後其他客服送出的訊息。
+ * sinceMessageId 找不到（例如被撤回）就視為沒有基準，不擋。
+ */
+export async function listAgentMessagesAfter(
+	db: D1Database,
+	conversationId: string,
+	sinceMessageId: string,
+	excludeAgent: string | null,
+): Promise<Message[]> {
+	const { results } = await db
+		.prepare(
+			`SELECT * FROM messages
+			 WHERE conversation_id = ? AND sender = 'agent' AND unsent_at IS NULL
+			   AND created_at > COALESCE((SELECT created_at FROM messages WHERE id = ?), 9007199254740991)
+			   AND (agent_name IS NULL OR agent_name != ?)
+			 ORDER BY created_at LIMIT 10`,
+		)
+		.bind(conversationId, sinceMessageId, excludeAgent ?? "")
+		.all<MessageRow>();
+	return results.map(toMessage);
+}
+
+// ---------- 系統狀態 ----------
+
+export async function getSystemState(db: D1Database, keys: string[]): Promise<Record<string, { value: string | null; updatedAt: number }>> {
+	if (keys.length === 0) return {};
+	const { results } = await db
+		.prepare(`SELECT key, value, updated_at FROM system_state WHERE key IN (${keys.map(() => "?").join(",")})`)
+		.bind(...keys)
+		.all<{ key: string; value: string | null; updated_at: number }>();
+	const out: Record<string, { value: string | null; updatedAt: number }> = {};
+	for (const r of results) out[r.key] = { value: r.value, updatedAt: r.updated_at };
+	return out;
+}
+
+export function systemStateStatement(db: D1Database, key: string, value: string | null, now = Date.now()): D1PreparedStatement {
+	return db
+		.prepare(
+			`INSERT INTO system_state (key, value, updated_at) VALUES (?, ?, ?)
+			 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+		)
+		.bind(key, value, now);
+}
+
+export async function setSystemState(db: D1Database, entries: Record<string, string | null>, now = Date.now()): Promise<void> {
+	const statements = Object.entries(entries).map(([k, v]) => systemStateStatement(db, k, v, now));
+	if (statements.length) await db.batch(statements);
+}
+
+// ---------- 完整性事件 ----------
+
+interface IntegrityRow {
+	id: string;
+	kind: string;
+	severity: string;
+	status: string;
+	conversation_id: string | null;
+	message_id: string | null;
+	dedupe_key: string | null;
+	title: string;
+	details: string | null;
+	started_at: number | null;
+	ended_at: number | null;
+	resolved_at: number | null;
+	resolution: string | null;
+	created_by: string | null;
+	created_at: number;
+	display_name?: string | null;
+}
+
+function toIntegrityEvent(row: IntegrityRow): IntegrityEvent {
+	return {
+		id: row.id,
+		kind: row.kind as IntegrityKind,
+		severity: row.severity as IntegritySeverity,
+		status: row.status as IntegrityStatus,
+		conversationId: row.conversation_id,
+		messageId: row.message_id,
+		title: row.title,
+		details: parseJson<Record<string, unknown> | null>(row.details, null),
+		startedAt: row.started_at,
+		endedAt: row.ended_at,
+		resolvedAt: row.resolved_at,
+		resolution: row.resolution,
+		createdBy: row.created_by,
+		createdAt: row.created_at,
+		displayName: row.display_name ?? null,
+	};
+}
+
+export interface NewIntegrityEvent {
+	id: string;
+	kind: IntegrityKind;
+	severity: IntegritySeverity;
+	conversationId?: string | null;
+	messageId?: string | null;
+	/** 有 dedupeKey 時同一把 key 只會有一筆；再次發生會累加 details.count 並延長 ended_at */
+	dedupeKey?: string | null;
+	title: string;
+	details?: Record<string, unknown> | null;
+	startedAt?: number | null;
+	endedAt?: number | null;
+	createdBy?: string | null;
+	createdAt: number;
+}
+
+/** 寫入事件；重複的 dedupeKey 會合併（count +1）。回傳目前這筆的狀態。 */
+export async function upsertIntegrityEvent(db: D1Database, input: NewIntegrityEvent): Promise<IntegrityEvent> {
+	const details = JSON.stringify({ count: 1, ...(input.details ?? {}) });
+	const results = await db.batch([
+		db
+			.prepare(
+				`INSERT INTO integrity_events
+				 (id, kind, severity, status, conversation_id, message_id, dedupe_key, title, details, started_at, ended_at, created_by, created_at)
+				 VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				 ON CONFLICT(dedupe_key) WHERE dedupe_key IS NOT NULL DO UPDATE SET
+					details = json_set(integrity_events.details, '$.count', COALESCE(json_extract(integrity_events.details, '$.count'), 1) + 1),
+					ended_at = COALESCE(excluded.ended_at, integrity_events.ended_at),
+					status = 'open', resolved_at = NULL`,
+			)
+			.bind(
+				input.id,
+				input.kind,
+				input.severity,
+				input.conversationId ?? null,
+				input.messageId ?? null,
+				input.dedupeKey ?? null,
+				input.title,
+				details,
+				input.startedAt ?? input.createdAt,
+				input.endedAt ?? null,
+				input.createdBy ?? null,
+				input.createdAt,
+			),
+		input.dedupeKey
+			? db.prepare("SELECT * FROM integrity_events WHERE dedupe_key = ?").bind(input.dedupeKey)
+			: db.prepare("SELECT * FROM integrity_events WHERE id = ?").bind(input.id),
+	]);
+	const row = firstRow<IntegrityRow>(results, 1);
+	if (!row) throw new Error("integrity event missing after insert");
+	return toIntegrityEvent(row);
+}
+
+export async function resolveIntegrityEvent(
+	db: D1Database,
+	id: string,
+	resolution: string | null,
+	resolvedBy: string | null,
+): Promise<IntegrityEvent | null> {
+	const results = await db.batch([
+		db
+			.prepare(
+				`UPDATE integrity_events SET status = 'resolved', resolved_at = ?, resolution = ?
+				 WHERE id = ? AND status = 'open'`,
+			)
+			.bind(Date.now(), resolvedBy ? `${resolution ?? ""}（${resolvedBy}）`.trim() : resolution, id),
+		db.prepare("SELECT * FROM integrity_events WHERE id = ?").bind(id),
+	]);
+	const row = firstRow<IntegrityRow>(results, 1);
+	return row ? toIntegrityEvent(row) : null;
+}
+
+/** 系統自行判定問題已消失時（例如附件補抓成功）用 dedupe key 關閉 */
+export async function resolveIntegrityByDedupeKey(db: D1Database, dedupeKey: string, resolution: string): Promise<IntegrityEvent | null> {
+	const results = await db.batch([
+		db
+			.prepare(
+				`UPDATE integrity_events SET status = 'resolved', resolved_at = ?, resolution = ?
+				 WHERE dedupe_key = ? AND status = 'open'`,
+			)
+			.bind(Date.now(), resolution, dedupeKey),
+		db.prepare("SELECT * FROM integrity_events WHERE dedupe_key = ? AND resolved_at IS NOT NULL").bind(dedupeKey),
+	]);
+	if (!results[0].meta.changes) return null;
+	const row = firstRow<IntegrityRow>(results, 1);
+	return row ? toIntegrityEvent(row) : null;
+}
+
+export async function listIntegrityEvents(
+	db: D1Database,
+	options: { status?: IntegrityStatus | "all"; conversationId?: string; kind?: IntegrityKind; limit?: number } = {},
+): Promise<IntegrityEvent[]> {
+	const where: string[] = [];
+	const binds: unknown[] = [];
+	if (options.status && options.status !== "all") {
+		where.push("e.status = ?");
+		binds.push(options.status);
+	}
+	if (options.conversationId) {
+		where.push("e.conversation_id = ?");
+		binds.push(options.conversationId);
+	}
+	if (options.kind) {
+		where.push("e.kind = ?");
+		binds.push(options.kind);
+	}
+	const limit = Math.min(Math.max(options.limit ?? 100, 1), 500);
+	const { results } = await db
+		.prepare(
+			`SELECT e.*, c.display_name FROM integrity_events e
+			 LEFT JOIN conversations c ON c.id = e.conversation_id
+			 ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+			 ORDER BY e.created_at DESC LIMIT ?`,
+		)
+		.bind(...binds, limit)
+		.all<IntegrityRow>();
+	return results.map(toIntegrityEvent);
+}
+
+/** 健康頁用的各種計數，一次 batch 取回 */
+export async function getIntegrityCounts(db: D1Database): Promise<{
+	openByKind: Partial<Record<IntegrityKind, number>>;
+	outbound: { pending: number; failed: number; unknown: number };
+	media: { pending: number; failed: number; expired: number };
+	importsUnmatched: number;
+}> {
+	const results = await db.batch([
+		db.prepare("SELECT kind, COUNT(*) AS n FROM integrity_events WHERE status = 'open' GROUP BY kind"),
+		db.prepare(
+			`SELECT delivery_status AS k, COUNT(*) AS n FROM messages
+			 WHERE delivery_status IN ('pending', 'failed', 'unknown') GROUP BY delivery_status`,
+		),
+		db.prepare(
+			`SELECT media_status AS k, COUNT(*) AS n FROM messages
+			 WHERE media_status IN ('pending', 'failed', 'expired') GROUP BY media_status`,
+		),
+		db.prepare("SELECT COUNT(*) AS n FROM import_rows WHERE status = 'unmatched'"),
+	]);
+	const openByKind: Partial<Record<IntegrityKind, number>> = {};
+	for (const r of (results[0].results ?? []) as { kind: IntegrityKind; n: number }[]) openByKind[r.kind] = r.n;
+	const outbound = { pending: 0, failed: 0, unknown: 0 };
+	for (const r of (results[1].results ?? []) as { k: keyof typeof outbound; n: number }[]) outbound[r.k] = r.n;
+	const media = { pending: 0, failed: 0, expired: 0 };
+	for (const r of (results[2].results ?? []) as { k: keyof typeof media; n: number }[]) media[r.k] = r.n;
+	const importsUnmatched = ((results[3].results?.[0] as { n: number } | undefined)?.n) ?? 0;
+	return { openByKind, outbound, media, importsUnmatched };
+}
+
+// ---------- 歷史匯入 ----------
+
+interface ImportBatchRow {
+	id: string;
+	source: string;
+	file_name: string | null;
+	account_name: string | null;
+	range_start: number | null;
+	range_end: number | null;
+	total_rows: number;
+	inserted: number;
+	duplicates: number;
+	unmatched: number;
+	skipped: number;
+	report: string | null;
+	created_by: string | null;
+	created_at: number;
+}
+
+function toImportBatch(row: ImportBatchRow): ImportBatch {
+	return {
+		id: row.id,
+		source: "manager_csv",
+		fileName: row.file_name,
+		accountName: row.account_name,
+		rangeStart: row.range_start,
+		rangeEnd: row.range_end,
+		totalRows: row.total_rows,
+		inserted: row.inserted,
+		duplicates: row.duplicates,
+		unmatched: row.unmatched,
+		skipped: row.skipped,
+		report: parseJson<ImportReport | null>(row.report, null),
+		createdBy: row.created_by,
+		createdAt: row.created_at,
+	};
+}
+
+export async function createImportBatch(
+	db: D1Database,
+	input: {
+		id: string;
+		fileName: string | null;
+		accountName: string | null;
+		rangeStart: number | null;
+		rangeEnd: number | null;
+		totalRows: number;
+		inserted: number;
+		duplicates: number;
+		unmatched: number;
+		skipped: number;
+		report: ImportReport;
+		createdBy: string | null;
+		createdAt: number;
+	},
+): Promise<ImportBatch> {
+	const results = await db.batch([
+		db
+			.prepare(
+				`INSERT INTO import_batches
+				 (id, source, file_name, account_name, range_start, range_end, total_rows, inserted, duplicates, unmatched, skipped, report, created_by, created_at)
+				 VALUES (?, 'manager_csv', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			)
+			.bind(
+				input.id,
+				input.fileName,
+				input.accountName,
+				input.rangeStart,
+				input.rangeEnd,
+				input.totalRows,
+				input.inserted,
+				input.duplicates,
+				input.unmatched,
+				input.skipped,
+				JSON.stringify(input.report),
+				input.createdBy,
+				input.createdAt,
+			),
+		db.prepare("SELECT * FROM import_batches WHERE id = ?").bind(input.id),
+	]);
+	const row = firstRow<ImportBatchRow>(results, 1);
+	if (!row) throw new Error("import batch missing after insert");
+	return toImportBatch(row);
+}
+
+/** 指派完成後更新批次計數 */
+export async function bumpImportBatch(
+	db: D1Database,
+	batchId: string,
+	delta: { inserted: number; duplicates: number; unmatched: number; skipped: number },
+): Promise<ImportBatch | null> {
+	const results = await db.batch([
+		db
+			.prepare(
+				`UPDATE import_batches SET inserted = inserted + ?, duplicates = duplicates + ?,
+					unmatched = unmatched + ?, skipped = skipped + ? WHERE id = ?`,
+			)
+			.bind(delta.inserted, delta.duplicates, delta.unmatched, delta.skipped, batchId),
+		db.prepare("SELECT * FROM import_batches WHERE id = ?").bind(batchId),
+	]);
+	const row = firstRow<ImportBatchRow>(results, 1);
+	return row ? toImportBatch(row) : null;
+}
+
+export async function listImportBatches(db: D1Database, limit = 50): Promise<ImportBatch[]> {
+	const { results } = await db
+		.prepare("SELECT * FROM import_batches ORDER BY created_at DESC LIMIT ?")
+		.bind(Math.min(limit, 200))
+		.all<ImportBatchRow>();
+	return results.map(toImportBatch);
+}
+
+export async function getImportBatch(db: D1Database, id: string): Promise<ImportBatch | null> {
+	const row = await db.prepare("SELECT * FROM import_batches WHERE id = ?").bind(id).first<ImportBatchRow>();
+	return row ? toImportBatch(row) : null;
+}
+
+export interface ImportRowInput {
+	id: string;
+	batchId: string;
+	chatName: string | null;
+	sender: string | null;
+	direction: MessageDirection;
+	text: string | null;
+	sentAt: number;
+	createdAt: number;
+}
+
+/** 配不到對話的列先存起來，等人工指派 */
+export async function insertImportRows(db: D1Database, rows: ImportRowInput[]): Promise<void> {
+	for (let i = 0; i < rows.length; i += 50) {
+		await db.batch(
+			rows.slice(i, i + 50).map((r) =>
+				db
+					.prepare(
+						`INSERT INTO import_rows (id, batch_id, chat_name, sender, direction, text, sent_at, status, created_at)
+						 VALUES (?, ?, ?, ?, ?, ?, ?, 'unmatched', ?)`,
+					)
+					.bind(r.id, r.batchId, r.chatName, r.sender, r.direction, r.text, r.sentAt, r.createdAt),
+			),
+		);
+	}
+}
+
+export async function listImportRowGroups(db: D1Database, batchId: string): Promise<ImportRowGroup[]> {
+	const { results } = await db
+		.prepare(
+			`SELECT chat_name, COUNT(*) AS rows, MIN(sent_at) AS first_at, MAX(sent_at) AS last_at,
+				(SELECT text FROM import_rows r2 WHERE r2.batch_id = r.batch_id AND r2.chat_name IS r.chat_name AND r2.status = 'unmatched' ORDER BY sent_at LIMIT 1) AS sample
+			 FROM import_rows r WHERE batch_id = ? AND status = 'unmatched'
+			 GROUP BY chat_name ORDER BY rows DESC`,
+		)
+		.bind(batchId)
+		.all<{ chat_name: string | null; rows: number; first_at: number; last_at: number; sample: string | null }>();
+	return results.map((r) => ({ chatName: r.chat_name ?? "", rows: r.rows, firstAt: r.first_at, lastAt: r.last_at, sample: r.sample }));
+}
+
+export async function listUnmatchedImportRows(db: D1Database, batchId: string, chatName: string): Promise<ImportRowInput[]> {
+	const { results } = await db
+		.prepare("SELECT * FROM import_rows WHERE batch_id = ? AND chat_name IS ? AND status = 'unmatched' ORDER BY sent_at")
+		.bind(batchId, chatName || null)
+		.all<{ id: string; batch_id: string; chat_name: string | null; sender: string | null; direction: string; text: string | null; sent_at: number; created_at: number }>();
+	return results.map((r) => ({
+		id: r.id,
+		batchId: r.batch_id,
+		chatName: r.chat_name,
+		sender: r.sender,
+		direction: r.direction as MessageDirection,
+		text: r.text,
+		sentAt: r.sent_at,
+		createdAt: r.created_at,
+	}));
+}
+
+export async function markImportRows(
+	db: D1Database,
+	batchId: string,
+	chatName: string,
+	status: "assigned" | "skipped",
+	conversationId: string | null,
+): Promise<number> {
+	const result = await db
+		.prepare("UPDATE import_rows SET status = ?, conversation_id = ? WHERE batch_id = ? AND chat_name IS ? AND status = 'unmatched'")
+		.bind(status, conversationId, batchId, chatName || null)
+		.run();
+	return result.meta.changes ?? 0;
+}
+
+/** 以顯示名稱找對話（匯入配對用）；名稱完全相同才算 */
+export async function findConversationsByName(db: D1Database, names: string[]): Promise<Map<string, { id: string; displayName: string | null; externalId: string }[]>> {
+	const out = new Map<string, { id: string; displayName: string | null; externalId: string }[]>();
+	for (let i = 0; i < names.length; i += 50) {
+		const chunk = names.slice(i, i + 50);
+		const { results } = await db
+			.prepare(`SELECT id, display_name, external_id FROM conversations WHERE display_name IN (${chunk.map(() => "?").join(",")})`)
+			.bind(...chunk)
+			.all<{ id: string; display_name: string | null; external_id: string }>();
+		for (const r of results) {
+			const list = out.get(r.display_name ?? "") ?? [];
+			list.push({ id: r.id, displayName: r.display_name, externalId: r.external_id });
+			out.set(r.display_name ?? "", list);
+		}
+	}
+	return out;
+}
+
+/**
+ * 匯入前先取對話在該時間範圍內已有的訊息（分鐘 + 文字），避免 webhook 已收到的訊息被 CSV 再塞一次。
+ */
+export async function listMessageKeysInRange(
+	db: D1Database,
+	conversationId: string,
+	start: number,
+	end: number,
+): Promise<Set<string>> {
+	const { results } = await db
+		.prepare("SELECT created_at, text FROM messages WHERE conversation_id = ? AND created_at BETWEEN ? AND ? AND text IS NOT NULL")
+		.bind(conversationId, start - 60_000, end + 60_000)
+		.all<{ created_at: number; text: string }>();
+	return new Set(results.map((r) => messageDedupeKey(r.created_at, r.text)));
+}
+
+export function messageDedupeKey(createdAt: number, text: string): string {
+	return `${Math.floor(createdAt / 60_000)}|${text.trim()}`;
+}
+
+export interface ImportedMessageInput {
+	id: string;
+	conversationId: string;
+	direction: MessageDirection;
+	text: string;
+	externalId: string;
+	createdAt: number;
+	batchId: string;
+	sender: string | null;
+}
+
+/**
+ * 寫入匯入的歷史訊息：不動未讀數、不觸發提醒；對話的 last_message 只在匯入的比現有的新時才更新。
+ * 以 external_id（內容雜湊）去重，重複匯入同一份 CSV 不會產生重複。
+ * 回傳實際寫入的筆數。
+ */
+export async function insertImportedMessages(db: D1Database, rows: ImportedMessageInput[]): Promise<number> {
+	let inserted = 0;
+	for (let i = 0; i < rows.length; i += 40) {
+		const chunk = rows.slice(i, i + 40);
+		const results = await db.batch(
+			chunk.flatMap((r) => [
+				db
+					.prepare(
+						`INSERT OR IGNORE INTO messages
+						 (id, conversation_id, direction, sender, type, text, metadata, external_id, created_at, source, delivery_status)
+						 VALUES (?, ?, ?, ?, 'text', ?, ?, ?, ?, 'manager_csv', ?)`,
+					)
+					.bind(
+						r.id,
+						r.conversationId,
+						r.direction,
+						r.direction === "inbound" ? "user" : "agent",
+						r.text,
+						JSON.stringify({ importBatchId: r.batchId, importedSender: r.sender }),
+						r.externalId,
+						r.createdAt,
+						r.direction === "outbound" ? "sent" : null,
+					),
+				db
+					.prepare(
+						`UPDATE conversations SET last_message_text = ?, last_message_at = ?, updated_at = ?
+						 WHERE id = ? AND (last_message_at IS NULL OR last_message_at < ?)
+						   AND EXISTS (SELECT 1 FROM messages WHERE id = ?)`,
+					)
+					.bind(r.text, r.createdAt, Date.now(), r.conversationId, r.createdAt, r.id),
+			]),
+		);
+		for (let j = 0; j < results.length; j += 2) inserted += results[j].meta.changes ? 1 : 0;
+	}
+	return inserted;
+}
+
+// ---------- 通知型訊息（PNP） ----------
+
+interface NotificationRow {
+	id: string;
+	phone_hash: string;
+	phone_masked: string;
+	messages: string;
+	source: string;
+	note: string | null;
+	delivery_tag: string;
+	status: string;
+	line_status: number | null;
+	line_request_id: string | null;
+	error: string | null;
+	sent_at: number | null;
+	delivered_at: number | null;
+	created_by: string | null;
+	created_at: number;
+}
+
+function toNotification(row: NotificationRow): Notification {
+	return {
+		id: row.id,
+		phoneMasked: row.phone_masked,
+		messages: parseJson<unknown[]>(row.messages, []),
+		source: row.source === "api" ? "api" : "console",
+		note: row.note,
+		deliveryTag: row.delivery_tag,
+		status: row.status as NotificationStatus,
+		lineStatus: row.line_status,
+		lineRequestId: row.line_request_id,
+		error: row.error,
+		sentAt: row.sent_at,
+		deliveredAt: row.delivered_at,
+		createdBy: row.created_by,
+		createdAt: row.created_at,
+	};
+}
+
+export async function createNotification(
+	db: D1Database,
+	input: {
+		id: string;
+		phoneHash: string;
+		phoneMasked: string;
+		messages: unknown[];
+		source: "console" | "api";
+		note: string | null;
+		deliveryTag: string;
+		createdBy: string | null;
+		createdAt: number;
+	},
+): Promise<Notification> {
+	const results = await db.batch([
+		db
+			.prepare(
+				`INSERT INTO notifications (id, phone_hash, phone_masked, messages, source, note, delivery_tag, status, created_by, created_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+			)
+			.bind(input.id, input.phoneHash, input.phoneMasked, JSON.stringify(input.messages), input.source, input.note, input.deliveryTag, input.createdBy, input.createdAt),
+		db.prepare("SELECT * FROM notifications WHERE id = ?").bind(input.id),
+	]);
+	const row = firstRow<NotificationRow>(results, 1);
+	if (!row) throw new Error("notification missing after insert");
+	return toNotification(row);
+}
+
+export async function getNotification(db: D1Database, id: string): Promise<Notification | null> {
+	const row = await db.prepare("SELECT * FROM notifications WHERE id = ?").bind(id).first<NotificationRow>();
+	return row ? toNotification(row) : null;
+}
+
+/** 發送結果；phoneHash 只在重送時需要 */
+export async function getNotificationPhoneHash(db: D1Database, id: string): Promise<string | null> {
+	const row = await db.prepare("SELECT phone_hash FROM notifications WHERE id = ?").bind(id).first<{ phone_hash: string }>();
+	return row?.phone_hash ?? null;
+}
+
+export async function setNotificationResult(
+	db: D1Database,
+	id: string,
+	status: NotificationStatus,
+	extra: { lineStatus?: number | null; lineRequestId?: string | null; error?: string | null; sentAt?: number | null },
+): Promise<Notification | null> {
+	const results = await db.batch([
+		db
+			.prepare(
+				`UPDATE notifications SET status = ?, line_status = ?, line_request_id = ?, error = ?, sent_at = COALESCE(?, sent_at)
+				 WHERE id = ?`,
+			)
+			.bind(status, extra.lineStatus ?? null, extra.lineRequestId ?? null, extra.error ?? null, extra.sentAt ?? null, id),
+		db.prepare("SELECT * FROM notifications WHERE id = ?").bind(id),
+	]);
+	const row = firstRow<NotificationRow>(results, 1);
+	return row ? toNotification(row) : null;
+}
+
+/** delivery 事件：用 X-Line-Delivery-Tag 對回發送紀錄 */
+export async function markNotificationDelivered(db: D1Database, deliveryTag: string, deliveredAt: number): Promise<Notification | null> {
+	const results = await db.batch([
+		db
+			.prepare("UPDATE notifications SET status = 'delivered', delivered_at = COALESCE(delivered_at, ?) WHERE delivery_tag = ?")
+			.bind(deliveredAt, deliveryTag),
+		db.prepare("SELECT * FROM notifications WHERE delivery_tag = ?").bind(deliveryTag),
+	]);
+	const row = firstRow<NotificationRow>(results, 1);
+	return row ? toNotification(row) : null;
+}
+
+export async function listNotifications(db: D1Database, limit = 100): Promise<Notification[]> {
+	const { results } = await db
+		.prepare("SELECT * FROM notifications ORDER BY created_at DESC LIMIT ?")
+		.bind(Math.min(limit, 500))
+		.all<NotificationRow>();
+	return results.map(toNotification);
 }

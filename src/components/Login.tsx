@@ -3,15 +3,17 @@ import { useState, type FormEvent } from "react";
 interface Props {
 	error: string | null;
 	busy: boolean;
-	onSubmit: (token: string) => void;
+	initialName: string | null;
+	onSubmit: (token: string, agentName: string) => void;
 }
 
-export function Login({ error, busy, onSubmit }: Props) {
+export function Login({ error, busy, initialName, onSubmit }: Props) {
 	const [token, setToken] = useState("");
+	const [name, setName] = useState(initialName ?? "");
 
 	const handleSubmit = (e: FormEvent) => {
 		e.preventDefault();
-		if (token.trim()) onSubmit(token.trim());
+		if (token.trim() && name.trim()) onSubmit(token.trim(), name.trim());
 	};
 
 	return (
@@ -29,8 +31,17 @@ export function Login({ error, busy, onSubmit }: Props) {
 					</p>
 				</div>
 				<input
+					type="text"
+					autoFocus={!initialName}
+					value={name}
+					onChange={(e) => setName(e.target.value)}
+					maxLength={40}
+					placeholder="你的名字（同事會看到，用於接手與避免重複回覆）"
+					className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:ring-2 focus:ring-emerald-500"
+				/>
+				<input
 					type="password"
-					autoFocus
+					autoFocus={!!initialName}
 					value={token}
 					onChange={(e) => setToken(e.target.value)}
 					placeholder="存取密鑰"
@@ -39,7 +50,7 @@ export function Login({ error, busy, onSubmit }: Props) {
 				{error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 				<button
 					type="submit"
-					disabled={busy || !token.trim()}
+					disabled={busy || !token.trim() || !name.trim()}
 					className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium py-2 transition-colors"
 				>
 					{busy ? "驗證中…" : "登入"}

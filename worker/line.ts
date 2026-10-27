@@ -7,6 +7,8 @@ import type { LineBotInfo, MessageType } from "../shared/types";
 
 const LINE_API = "https://api.line.me/v2/bot";
 const LINE_DATA_API = "https://api-data.line.me/v2/bot";
+/** 通知型訊息（PNP）走不同路徑，沒有 /v2 */
+const LINE_PNP_API = "https://api.line.me/bot/pnp";
 
 // ---------- 簽章 ----------
 
@@ -139,6 +141,8 @@ export interface LineWebhookEvent {
 	message?: LineMessageContent;
 	postback?: { data: string; params?: Record<string, string> };
 	unsend?: { messageId: string };
+	/** PNP 送達事件：data 是發送時的 X-Line-Delivery-Tag */
+	delivery?: { data: string };
 }
 
 /** 從事件取出 markAsReadToken；官方放在事件層，這裡同時容忍放在 message 內的變體 */
@@ -388,18 +392,39 @@ export class LineClient {
 		return (await res.json()) as { groupName: string; pictureUrl?: string };
 	}
 
-	async pushText(to: string, text: string): Promise<void> {
-		await this.push(to, [{ type: "text", text }]);
+	/**
+	 * Push API。retryKey 帶 X-Line-Retry-Key：同一把 key 在 24 小時內重送，LINE 不會再送一次而是回 409，
+	 * 所以呼叫端可以把 409 視為「已送達」。回傳結果而不丟例外，由呼叫端決定狀態。
+	 */
+	async push(to: string, messages: unknown[], options: { retryKey?: string } = {}): Promise<LineSendResult> {
+		const headers: Record<string, string> = { "Content-Type": "application/json" };
+		if (options.retryKey) headers["X-Line-Retry-Key"] = options.retryKey;
+		try {
+			const res = await this.request("push", `${LINE_API}/message/push`, {
+				method: "POST",
+				headers,
+				body: JSON.stringify({ to, messages }),
+			});
+			return await sendResult(res);
+		} catch (err) {
+			return { ok: false, status: 0, requestId: null, error: err instanceof Error ? err.message : String(err), transient: true };
+		}
 	}
 
-	async push(to: string, messages: unknown[]): Promise<void> {
-		const res = await this.request("push", `${LINE_API}/message/push`, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ to, messages }),
-		});
-		if (!res.ok) {
-			throw new Error(`LINE push failed (${res.status}): ${await res.text()}`);
+	/**
+	 * 通知型訊息（PNP）：to 是電話號碼（E.164）的 SHA-256 hex；deliveryTag 會原樣出現在 delivery 事件。
+	 * 不支援 X-Line-Retry-Key，重送要由呼叫端自行判斷。
+	 */
+	async pushNotification(toHash: string, messages: unknown[], deliveryTag: string): Promise<LineSendResult> {
+		try {
+			const res = await this.request("pnp-push", `${LINE_PNP_API}/push`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json", "X-Line-Delivery-Tag": deliveryTag },
+				body: JSON.stringify({ to: toHash, messages }),
+			});
+			return await sendResult(res);
+		} catch (err) {
+			return { ok: false, status: 0, requestId: null, error: err instanceof Error ? err.message : String(err), transient: true };
 		}
 	}
 
@@ -442,18 +467,66 @@ export class LineClient {
 		};
 	}
 
-	/** 下載使用者傳來的圖片／影片／語音／檔案 */
+	/**
+	 * 下載使用者傳來的圖片／影片／語音／檔案。
+	 * LINE 只保留一段時間（未公開），過期回 404 / 410；回傳 status 讓呼叫端分辨「過期」與「暫時失敗」。
+	 */
 	async getContent(
 		messageId: string,
-	): Promise<{ body: ReadableStream; contentType: string } | null> {
+	): Promise<{ status: number; body: ReadableStream | null; contentType: string }> {
 		const res = await this.request("content", `${LINE_DATA_API}/message/${messageId}/content`);
-		if (!res.ok || !res.body) return null;
 		return {
-			body: res.body,
-			contentType:
-				res.headers.get("content-type") ?? "application/octet-stream",
+			status: res.status,
+			body: res.ok ? res.body : null,
+			contentType: res.headers.get("content-type") ?? "application/octet-stream",
 		};
 	}
+}
+
+export interface LineSendResult {
+	ok: boolean;
+	status: number;
+	requestId: string | null;
+	error: string | null;
+	/** 5xx、429、網路錯誤：值得稍後重試 */
+	transient: boolean;
+}
+
+async function sendResult(res: Response): Promise<LineSendResult> {
+	const requestId = res.headers.get("x-line-request-id");
+	if (res.ok) return { ok: true, status: res.status, requestId, error: null, transient: false };
+	let error = `LINE API ${res.status}`;
+	try {
+		const text = await res.text();
+		if (text) error = `${error}: ${text.slice(0, 500)}`;
+	} catch {
+		// ignore
+	}
+	return { ok: false, status: res.status, requestId, error, transient: res.status === 429 || res.status >= 500 };
+}
+
+/** 電話號碼 → E.164 → SHA-256 hex（PNP 的 to 欄位）。只回傳 hash 與遮罩，明碼不落地。 */
+export async function hashPhoneNumber(
+	raw: string,
+	defaultCountryCode = "886",
+): Promise<{ hash: string; masked: string; e164: string } | null> {
+	let digits = raw.replace(/[^\d+]/g, "");
+	if (!digits) return null;
+	if (digits.startsWith("+")) {
+		digits = digits.slice(1);
+	} else if (digits.startsWith("00")) {
+		digits = digits.slice(2);
+	} else if (digits.startsWith("0")) {
+		// 本地格式：去掉 trunk 0 加國碼
+		digits = defaultCountryCode + digits.slice(1);
+	} else if (!digits.startsWith(defaultCountryCode)) {
+		digits = defaultCountryCode + digits;
+	}
+	if (digits.length < 8 || digits.length > 15) return null;
+	const e164 = `+${digits}`;
+	const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(e164));
+	const hash = Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, "0")).join("");
+	return { hash, masked: `${e164.slice(0, 4)}****${e164.slice(-4)}`, e164 };
 }
 
 /** LINE 官方貼圖圖檔 */

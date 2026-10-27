@@ -1,8 +1,11 @@
 import { useState, type KeyboardEvent } from "react";
+import type { Message, SendConflict } from "../../shared/types";
+import { ApiError } from "../api";
 
 interface Props {
 	disabled: boolean;
-	onSend: (text: string) => Promise<void>;
+	/** force = 已確認衝突仍要送出 */
+	onSend: (text: string, force: boolean) => Promise<void>;
 	onOpenPrompt: () => void;
 }
 
@@ -10,17 +13,23 @@ export function Composer({ disabled, onSend, onOpenPrompt }: Props) {
 	const [text, setText] = useState("");
 	const [sending, setSending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [conflict, setConflict] = useState<SendConflict | null>(null);
 
-	const send = async () => {
+	const send = async (force = false) => {
 		const value = text.trim();
 		if (!value || sending) return;
 		setSending(true);
 		setError(null);
+		setConflict(null);
 		try {
-			await onSend(value);
+			await onSend(value, force);
 			setText("");
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "送出失敗");
+			if (err instanceof ApiError && err.status === 409 && err.data?.code) {
+				setConflict(err.data as unknown as SendConflict);
+			} else {
+				setError(err instanceof Error ? err.message : "送出失敗");
+			}
 		} finally {
 			setSending(false);
 		}
@@ -36,6 +45,26 @@ export function Composer({ disabled, onSend, onOpenPrompt }: Props) {
 	return (
 		<div className="border-t border-neutral-200 dark:border-neutral-800 p-3 bg-white dark:bg-neutral-900">
 			{error && <p className="text-xs text-red-600 dark:text-red-400 mb-2">{error}</p>}
+			{conflict && (
+				<div className="mb-2 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
+					<div className="font-medium">
+						{conflict.code === "assigned" ? `此對話由 ${conflict.assignedTo} 接手中` : conflict.error}
+					</div>
+					{conflict.messages?.slice(0, 3).map((m: Message) => (
+						<div key={m.id} className="mt-1 truncate opacity-90">
+							{m.agentName ?? "另一位客服"}：{m.text}
+						</div>
+					))}
+					<div className="mt-2 flex gap-2">
+						<button onClick={() => void send(true)} className="px-2.5 py-1 rounded bg-amber-600 text-white hover:bg-amber-700">
+							仍要送出
+						</button>
+						<button onClick={() => setConflict(null)} className="px-2.5 py-1 rounded border border-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/40">
+							取消
+						</button>
+					</div>
+				</div>
+			)}
 			<div className="flex gap-2 items-end">
 				<button
 					type="button"

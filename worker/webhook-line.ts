@@ -1,5 +1,5 @@
 import {
-	LineClient,
+	type LineClient,
 	conversationTarget,
 	markAsReadTokenOf,
 	parsePromptPostback,
@@ -12,18 +12,23 @@ import {
 import {
 	editMessageText,
 	findMessageByExternalId,
-	getConversation,
 	getPrompt,
 	getReminderInstanceId,
 	insertMessage,
 	recordPromptResponse,
 	setReminderInstanceId,
+	setSystemState,
 	unsendMessage,
-	updateMessageMedia,
 	updateMessageMetadata,
 	upsertConversation,
 } from "./db";
 import type { MessageQuote } from "../shared/types";
+import { lineClientFor } from "./line-env";
+import { storeMedia } from "./media";
+import { recordIntegrity, STATE_KEYS } from "./integrity";
+import { handleDeliveryEvent } from "./pnp";
+
+export { lineClientFor };
 import { inboxStub } from "./inbox-do";
 import { recordMetric } from "./metrics";
 
@@ -31,12 +36,6 @@ import { recordMetric } from "./metrics";
 export interface LineEventJob {
 	event: LineWebhookEvent;
 	receivedAt: number;
-}
-
-export function lineClientFor(env: Env): LineClient {
-	return new LineClient(env.LINE_CHANNEL_ACCESS_TOKEN, (endpoint, status, ms) =>
-		recordMetric(env, { name: "line.api", labels: [endpoint, String(status)], values: [ms] }),
-	);
 }
 
 /**
@@ -78,6 +77,13 @@ export async function handleLineWebhook(
 	const events = body.events ?? [];
 	const useQueue = (env.WEBHOOK_MODE as string) === "queue" && env.LINE_EVENTS;
 	recordMetric(env, { name: "webhook.received", labels: [useQueue ? "queue" : "inline"], values: [events.length] });
+	// 健康頁用：最後一次收到 webhook／重送的時間（不擋回應）
+	if (events.length) {
+		const now = Date.now();
+		const state: Record<string, string> = { [STATE_KEYS.lastWebhookAt]: String(now) };
+		if (events.some((e) => e.deliveryContext?.isRedelivery)) state[STATE_KEYS.lastRedeliveryAt] = String(now);
+		ctx.waitUntil(setSystemState(env.DB, state, now).catch((err) => console.error("system state failed", err)));
+	}
 
 	if (useQueue && events.length) {
 		const receivedAt = Date.now();
@@ -152,12 +158,27 @@ async function handleEvent(
 	const target = conversationTarget(event.source);
 	if (!target) return;
 
-	// LINE 標記為重送的事件另外計數：這是「曾經接收失敗」的證據，之後對帳用
+	// LINE 標記為重送的事件：這是「接收端曾經失敗」的證據。以小時為單位彙整成一筆缺口紀錄（count 累加），避免洗版
 	if (event.deliveryContext?.isRedelivery) {
 		recordMetric(env, { name: "webhook.redelivery", labels: [event.type], values: [1] });
+		const hour = Math.floor((event.timestamp || Date.now()) / 3_600_000) * 3_600_000;
+		await recordIntegrity(env, {
+			kind: "webhook_redelivery",
+			severity: "warning",
+			dedupeKey: `redelivery:${hour}`,
+			title: "LINE 重送了事件：這段期間接收端曾經失敗，重送不保證涵蓋所有事件",
+			details: { hour, lastEventType: event.type, lastWebhookEventId: event.webhookEventId ?? null },
+			startedAt: hour,
+			endedAt: event.timestamp || Date.now(),
+		});
 	}
 
 	switch (event.type) {
+		case "delivery":
+			if (event.delivery?.data) {
+				await handleDeliveryEvent(env, event.delivery.data, event.timestamp || Date.now());
+			}
+			return;
 		case "message":
 			if (event.message) {
 				await handleMessage(event, target, env, ctx, client);
@@ -330,6 +351,14 @@ async function handleMessage(
 		metadata = { ...(metadata ?? {}), isRedelivery: true };
 	}
 
+	// 媒體：先回應 LINE，再背景下載到 R2；狀態先標 pending，排程會補抓沒抓到的
+	const needsDownload =
+		(content.type === "image" ||
+			content.type === "video" ||
+			content.type === "audio" ||
+			content.type === "file") &&
+		!(metadata?.externalUrl as string | undefined);
+
 	const inserted = await insertMessage(env.DB, {
 		id: crypto.randomUUID(),
 		conversationId: target.conversationId,
@@ -341,6 +370,8 @@ async function handleMessage(
 		externalId: content.id,
 		createdAt: now,
 		markAsReadToken: markAsReadTokenOf(event),
+		source: "line_webhook",
+		mediaStatus: needsDownload ? "pending" : null,
 	});
 	if (!inserted) return; // LINE 重送的重複事件
 
@@ -350,17 +381,21 @@ async function handleMessage(
 		conversation: inserted.conversation,
 	});
 
-	// 媒體：先回應 LINE，再背景下載到 R2
-	const needsDownload =
-		(content.type === "image" ||
-			content.type === "video" ||
-			content.type === "audio" ||
-			content.type === "file") &&
-		!(metadata?.externalUrl as string | undefined);
 	if (needsDownload) {
-		ctx.waitUntil(
-			storeMedia(inserted.message.id, content.id, target.conversationId, env, client),
-		);
+		ctx.waitUntil(storeMedia(env, client, inserted.message));
+	}
+
+	if (metadata?.quote && (metadata.quote as MessageQuote).messageId === null) {
+		await recordIntegrity(env, {
+			kind: "quote_missing",
+			severity: "warning",
+			conversationId: target.conversationId,
+			messageId: inserted.message.id,
+			dedupeKey: `quote_missing:${inserted.message.id}`,
+			title: "使用者引用了一則本地沒有的訊息（可能在串接前，或來自未同步的來源）",
+			details: { quotedMessageId: (metadata.quote as MessageQuote).externalId, text: text?.slice(0, 200) ?? null },
+			startedAt: now,
+		});
 	}
 
 	await startReminderIfNeeded(target.conversationId, env);
@@ -509,6 +544,8 @@ async function handlePostback(
 				type: "text",
 				text,
 				createdAt: now + 1,
+				source: "system",
+				deliveryStatus: "sent",
 			});
 		} catch (err) {
 			console.error("postback reply failed", err);
@@ -525,42 +562,6 @@ function formatTime(ts: number): string {
 		minute: "2-digit",
 		hour12: false,
 	}).format(new Date(ts));
-}
-
-async function storeMedia(
-	messageId: string,
-	lineMessageId: string,
-	conversationId: string,
-	env: Env,
-	client: LineClient,
-): Promise<void> {
-	try {
-		const content = await client.getContent(lineMessageId);
-		if (!content) return;
-		const key = `line/${lineMessageId}`;
-		await env.MEDIA.put(key, content.body, {
-			httpMetadata: { contentType: content.contentType },
-			customMetadata: { conversationId, messageId },
-		});
-		const message = await updateMessageMedia(
-			env.DB,
-			messageId,
-			key,
-			content.contentType,
-		);
-		if (message) {
-			const conversation = await getConversation(env.DB, conversationId);
-			if (conversation) {
-				await inboxStub(env).broadcast({
-					type: "message.new",
-					message,
-					conversation,
-				});
-			}
-		}
-	} catch (err) {
-		console.error("store media failed", lineMessageId, err);
-	}
 }
 
 /**
@@ -623,6 +624,8 @@ async function handleFollow(
 				type: "text",
 				text: welcome,
 				createdAt: now + 1,
+				source: "system",
+				deliveryStatus: "sent",
 			});
 			if (inserted) {
 				await inboxStub(env).broadcast({
