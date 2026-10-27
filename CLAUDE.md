@@ -37,6 +37,7 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 | `worker/db.ts` | 所有 SQL 集中於此 |
 | `worker/inbox-do.ts` | 單一實例 `InboxDO`（名稱固定 `"inbox"`），WebSocket 廣播 |
 | `worker/workflow.ts` | `ReplyReminderWorkflow` 逾時提醒 |
+| `worker/metrics.ts` | Analytics Engine 指標（`recordMetric` / `timed`），寫入失敗一律吞掉 |
 | `src/builder/` | 傻瓜編輯台的核心：`limits.ts`（LINE 上限，所有欄位以此為準）、`types.ts`（草稿結構）、`toLine.ts`（草稿→LINE JSON，輸出必定合法；`validateDraft` 列出必填缺漏）、`presets.ts`（表單範本） |
 | `src/components/builder/` | 編輯台 UI：`BuilderDialog`（主畫面）、`MessageForm`（各類型表單）、`ActionEditor`（按鈕）、`fields.tsx`（含字數計數的輸入框） |
 | `src/presets.ts` | JSON 模式的範例（LINE 訊息陣列），給進階使用者 |
@@ -58,12 +59,16 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 - 對話清單：後端游標分頁（`before` = 上一頁最後一筆的 `last_message_at`）+ `q` 搜尋；前端虛擬捲動（`ConversationList.tsx` 固定列高 68px）、記憶體上限 1000 筆、事件以「移除再插入正確位置」更新，不整個重排。新功能不得回到「一次載入全部對話」或「每個事件重排整個陣列」。
 - 統計數字（未讀總數等）一律由 `/api/stats` 查 D1，不在前端加總已載入的列。
 - 不要為每個對話建立 Durable Object；不要讓 Workflow 實例數跟訊息數成正比（每個對話同時最多一個提醒實例）。
+- D1 操作以 `db.batch` 合併為單次往返；新增寫入路徑時維持「寫 + 回讀」同一個 batch，不要拆成多次 `run()` / `first()`。
+- webhook：`WEBHOOK_MODE=queue` 時只驗簽與入列，處理邏輯在 `consumeLineEvents`；所有事件處理必須可重送（external_id / webhookEventId 去重），因為 Queues 會重試。
+- 任何對外呼叫或關鍵路徑都用 `recordMetric` 記耗時與結果，指標名用小寫點分隔（`line.api`、`queue.consume`）。
 
 ## 已知事項
 
 - LINE 按鈕可反覆按：`recordPromptResponse` 每次都寫 `prompt_responses`，但只有第一次（或 `allow_change = 1`）會更新 `prompts` 的結果；重複按會回覆「以第一次回覆為準」。
 
 - `wrangler.jsonc` 的 `migrations`（Durable Object）只能追加新 tag，絕不能改寫或刪除已部署過的 tag，否則 Cloudflare 會略過它並在部署時報 10064。正式環境目前已套用到 `v2`。
+- Queues 只在 Workers Paid 提供。`scripts/bootstrap.sh` 建不出 queue 時會改寫 dist 內的部署設定（移除 `queues`、`WEBHOOK_MODE=inline`），程式端以 `env.LINE_EVENTS` 是否存在再保險一次。`wrangler.jsonc` 本身保持 queue 設定。
 - 正式環境的 Worker `workflows-starter-template` 曾部署過原始範本，舊的 Workflow `my-workflow` 可能殘留在 dashboard，不影響運作，可手動刪除。
 - `test/reminder.test.ts` 會印一行 `WorkflowTimeoutError` 的 uncaught exception，來自測試工具 `forceEventTimeout` 內部，測試本身通過，可忽略。
 - 客服台目前為單一共用 `CONSOLE_TOKEN`，無個別帳號。

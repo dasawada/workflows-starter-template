@@ -7,6 +7,12 @@ import type { InboxEvent } from "../shared/types";
  * - 讓 Worker / Workflow 透過 RPC broadcast() 把事件推給所有在線客服
  */
 export class InboxDO extends DurableObject<Env> {
+	constructor(ctx: DurableObjectState, env: Env) {
+		super(ctx, env);
+		// 前端每 25 秒送 "ping"：交給平台直接回 "pong"，DO 不會因此被喚醒，成本為零
+		ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+	}
+
 	async fetch(request: Request): Promise<Response> {
 		if (request.headers.get("Upgrade") !== "websocket") {
 			return new Response("Expected WebSocket", { status: 426 });
@@ -35,9 +41,8 @@ export class InboxDO extends DurableObject<Env> {
 		return this.ctx.getWebSockets().length;
 	}
 
-	async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
-		// 前端定期送 ping 維持連線
-		if (message === "ping") ws.send("pong");
+	async webSocketMessage(_ws: WebSocket, _message: string | ArrayBuffer) {
+		// ping/pong 已由 setWebSocketAutoResponse 處理；目前客服台不會送其他訊息
 	}
 
 	async webSocketClose(ws: WebSocket, code: number, reason: string) {

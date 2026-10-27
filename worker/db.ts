@@ -176,8 +176,14 @@ export async function getStats(db: D1Database): Promise<Stats> {
 	};
 }
 
+/** D1 batch 的結果取第 n 筆的第一列 */
+function firstRow<T>(results: D1Result[], index: number): T | null {
+	const rows = results[index]?.results as T[] | undefined;
+	return rows && rows.length ? rows[0] : null;
+}
+
 /**
- * 建立或更新對話的基本資料（顯示名稱、頭像）。
+ * 建立或更新對話的基本資料（顯示名稱、頭像）。一次往返。
  */
 export async function upsertConversation(
 	db: D1Database,
@@ -190,7 +196,7 @@ export async function upsertConversation(
 		now: number;
 	},
 ): Promise<Conversation> {
-	await db
+	const upsert = db
 		.prepare(
 			`INSERT INTO conversations (id, channel, external_id, display_name, picture_url, status, created_at, updated_at)
 			 VALUES (?, ?, ?, ?, ?, 'open', ?, ?)
@@ -207,13 +213,16 @@ export async function upsertConversation(
 			input.pictureUrl ?? null,
 			input.now,
 			input.now,
-		)
-		.run();
-	const conversation = await getConversation(db, input.id);
-	if (!conversation) {
+		);
+	const results = await db.batch([
+		upsert,
+		db.prepare("SELECT * FROM conversations WHERE id = ?").bind(input.id),
+	]);
+	const row = firstRow<ConversationRow>(results, 1);
+	if (!row) {
 		throw new Error(`conversation ${input.id} missing after upsert`);
 	}
-	return conversation;
+	return toConversation(row);
 }
 
 export interface NewMessageInput {
@@ -249,8 +258,9 @@ export function previewText(type: MessageType, text: string | null): string {
 }
 
 /**
- * 寫入訊息並同步更新對話摘要。
+ * 寫入訊息並同步更新對話摘要，整個流程一次 D1 往返（batch）。
  * 使用者傳入的訊息會把對話重新打開並累加未讀；客服送出的訊息會清除「待處理」標記。
+ * 對話摘要的 UPDATE 以「這則訊息真的存在」為條件，所以 LINE 重送（INSERT 被 IGNORE）不會重複累加未讀。
  * 回傳 null 代表這則訊息（依 external_id）已經存在，屬於 LINE 重送。
  */
 export async function insertMessage(
@@ -280,18 +290,13 @@ export async function insertMessage(
 			input.createdAt,
 		);
 
-	const inserted = await insert.run();
-	if (!inserted.meta.changes) {
-		return null;
-	}
-
 	const update = isInbound
 		? db
 				.prepare(
 					`UPDATE conversations SET
 						last_message_text = ?, last_message_at = ?, last_inbound_at = ?,
 						unread_count = unread_count + 1, status = 'open', updated_at = ?
-					 WHERE id = ?`,
+					 WHERE id = ? AND EXISTS (SELECT 1 FROM messages WHERE id = ?)`,
 				)
 				.bind(
 					preview,
@@ -299,13 +304,14 @@ export async function insertMessage(
 					input.createdAt,
 					input.createdAt,
 					input.conversationId,
+					input.id,
 				)
 		: db
 				.prepare(
 					`UPDATE conversations SET
 						last_message_text = ?, last_message_at = ?, last_outbound_at = ?,
 						needs_attention = 0, updated_at = ?
-					 WHERE id = ?`,
+					 WHERE id = ? AND EXISTS (SELECT 1 FROM messages WHERE id = ?)`,
 				)
 				.bind(
 					preview,
@@ -313,18 +319,24 @@ export async function insertMessage(
 					input.createdAt,
 					input.createdAt,
 					input.conversationId,
+					input.id,
 				);
-	await update.run();
 
-	const row = await db
-		.prepare("SELECT * FROM messages WHERE id = ?")
-		.bind(input.id)
-		.first<MessageRow>();
-	const conversation = await getConversation(db, input.conversationId);
-	if (!row || !conversation) {
+	const results = await db.batch([
+		insert,
+		update,
+		db.prepare("SELECT * FROM messages WHERE id = ?").bind(input.id),
+		db.prepare("SELECT * FROM conversations WHERE id = ?").bind(input.conversationId),
+	]);
+	if (!results[0].meta.changes) {
+		return null;
+	}
+	const row = firstRow<MessageRow>(results, 2);
+	const convRow = firstRow<ConversationRow>(results, 3);
+	if (!row || !convRow) {
 		throw new Error("message/conversation missing after insert");
 	}
-	return { message: toMessage(row), conversation };
+	return { message: toMessage(row), conversation: toConversation(convRow) };
 }
 
 export async function updateMessageMedia(
@@ -333,16 +345,13 @@ export async function updateMessageMedia(
 	mediaKey: string,
 	contentType: string,
 ): Promise<Message | null> {
-	await db
-		.prepare(
-			"UPDATE messages SET media_key = ?, media_content_type = ? WHERE id = ?",
-		)
-		.bind(mediaKey, contentType, messageId)
-		.run();
-	const row = await db
-		.prepare("SELECT * FROM messages WHERE id = ?")
-		.bind(messageId)
-		.first<MessageRow>();
+	const results = await db.batch([
+		db
+			.prepare("UPDATE messages SET media_key = ?, media_content_type = ? WHERE id = ?")
+			.bind(mediaKey, contentType, messageId),
+		db.prepare("SELECT * FROM messages WHERE id = ?").bind(messageId),
+	]);
+	const row = firstRow<MessageRow>(results, 1);
 	return row ? toMessage(row) : null;
 }
 
@@ -373,13 +382,14 @@ export async function markConversationRead(
 	db: D1Database,
 	conversationId: string,
 ): Promise<Conversation | null> {
-	await db
-		.prepare(
-			"UPDATE conversations SET unread_count = 0, updated_at = ? WHERE id = ?",
-		)
-		.bind(Date.now(), conversationId)
-		.run();
-	return getConversation(db, conversationId);
+	const results = await db.batch([
+		db
+			.prepare("UPDATE conversations SET unread_count = 0, updated_at = ? WHERE id = ?")
+			.bind(Date.now(), conversationId),
+		db.prepare("SELECT * FROM conversations WHERE id = ?").bind(conversationId),
+	]);
+	const row = firstRow<ConversationRow>(results, 1);
+	return row ? toConversation(row) : null;
 }
 
 export async function setConversationStatus(
@@ -387,15 +397,18 @@ export async function setConversationStatus(
 	conversationId: string,
 	status: ConversationStatus,
 ): Promise<Conversation | null> {
-	await db
-		.prepare(
-			`UPDATE conversations SET status = ?, updated_at = ?,
-				needs_attention = CASE WHEN ? = 'closed' THEN 0 ELSE needs_attention END
-			 WHERE id = ?`,
-		)
-		.bind(status, Date.now(), status, conversationId)
-		.run();
-	return getConversation(db, conversationId);
+	const results = await db.batch([
+		db
+			.prepare(
+				`UPDATE conversations SET status = ?, updated_at = ?,
+					needs_attention = CASE WHEN ? = 'closed' THEN 0 ELSE needs_attention END
+				 WHERE id = ?`,
+			)
+			.bind(status, Date.now(), status, conversationId),
+		db.prepare("SELECT * FROM conversations WHERE id = ?").bind(conversationId),
+	]);
+	const row = firstRow<ConversationRow>(results, 1);
+	return row ? toConversation(row) : null;
 }
 
 /**
@@ -424,14 +437,11 @@ export async function updateMessageMetadata(
 	messageId: string,
 	metadata: Record<string, unknown>,
 ): Promise<Message | null> {
-	await db
-		.prepare("UPDATE messages SET metadata = ? WHERE id = ?")
-		.bind(JSON.stringify(metadata), messageId)
-		.run();
-	const row = await db
-		.prepare("SELECT * FROM messages WHERE id = ?")
-		.bind(messageId)
-		.first<MessageRow>();
+	const results = await db.batch([
+		db.prepare("UPDATE messages SET metadata = ? WHERE id = ?").bind(JSON.stringify(metadata), messageId),
+		db.prepare("SELECT * FROM messages WHERE id = ?").bind(messageId),
+	]);
+	const row = firstRow<MessageRow>(results, 1);
 	return row ? toMessage(row) : null;
 }
 
@@ -502,7 +512,7 @@ export async function createPrompt(
 		createdAt: number;
 	},
 ): Promise<Prompt> {
-	await db
+	const insert = db
 		.prepare(
 			`INSERT INTO prompts
 			 (id, conversation_id, message_id, template_key, body, question, options, variables, payload, allow_change, status, created_at)
@@ -520,32 +530,35 @@ export async function createPrompt(
 			input.payload ? JSON.stringify(input.payload) : null,
 			input.allowChange ? 1 : 0,
 			input.createdAt,
+		);
+	const results = await db.batch([insert, promptSelect(db, input.id)]);
+	const row = firstRow<PromptRow>(results, 1);
+	if (!row) throw new Error("prompt missing after insert");
+	return toPrompt(row);
+}
+
+function promptSelect(db: D1Database, id: string) {
+	return db
+		.prepare(
+			`SELECT p.*, c.display_name FROM prompts p
+			 LEFT JOIN conversations c ON c.id = p.conversation_id
+			 WHERE p.id = ?`,
 		)
-		.run();
-	const prompt = await getPrompt(db, input.id);
-	if (!prompt) throw new Error("prompt missing after insert");
-	return prompt;
+		.bind(id);
 }
 
 export async function getPrompt(
 	db: D1Database,
 	id: string,
 ): Promise<Prompt | null> {
-	const row = await db
-		.prepare(
-			`SELECT p.*, c.display_name FROM prompts p
-			 LEFT JOIN conversations c ON c.id = p.conversation_id
-			 WHERE p.id = ?`,
-		)
-		.bind(id)
-		.first<PromptRow>();
+	const row = await promptSelect(db, id).first<PromptRow>();
 	return row ? toPrompt(row) : null;
 }
 
 /**
- * 記錄一次點擊。每一次都寫 prompt_responses（留痕）；
- * prompt 本身的選擇只在「第一次」或「allow_change 開啟」時更新。
- * 回傳 applied 告訴呼叫端這次點擊有沒有改變結果。
+ * 記錄一次點擊，一次 D1 往返。每一次都寫 prompt_responses（留痕）；
+ * prompt 本身的選擇只在「尚未回覆」或「allow_change 開啟」時更新（條件寫在 SQL 裡）。
+ * 回傳 applied 告訉呼叫端這次點擊有沒有改變結果。
  */
 export async function recordPromptResponse(
 	db: D1Database,
@@ -554,32 +567,31 @@ export async function recordPromptResponse(
 	choiceLabel: string | null,
 	now: number,
 ): Promise<{ prompt: Prompt; alreadyAnswered: boolean; applied: boolean } | null> {
-	const before = await getPrompt(db, promptId);
-	if (!before) return null;
-	const alreadyAnswered = before.status === "answered";
-	const applied = !alreadyAnswered || before.allowChange;
-
-	const statements = [
+	const results = await db.batch([
+		db.prepare("SELECT status FROM prompts WHERE id = ?").bind(promptId),
 		db
 			.prepare(
-				"INSERT INTO prompt_responses (id, prompt_id, choice, choice_label, created_at) VALUES (?, ?, ?, ?, ?)",
+				`INSERT INTO prompt_responses (id, prompt_id, choice, choice_label, created_at)
+				 SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM prompts WHERE id = ?)`,
 			)
-			.bind(crypto.randomUUID(), promptId, choice, choiceLabel, now),
-	];
-	if (applied) {
-		statements.push(
-			db
-				.prepare(
-					"UPDATE prompts SET status = 'answered', choice = ?, choice_label = ?, responded_at = ? WHERE id = ?",
-				)
-				.bind(choice, choiceLabel, now, promptId),
-		);
-	}
-	await db.batch(statements);
-
-	const prompt = await getPrompt(db, promptId);
-	if (!prompt) return null;
-	return { prompt, alreadyAnswered, applied };
+			.bind(crypto.randomUUID(), promptId, choice, choiceLabel, now, promptId),
+		db
+			.prepare(
+				`UPDATE prompts SET status = 'answered', choice = ?, choice_label = ?, responded_at = ?
+				 WHERE id = ? AND (status != 'answered' OR allow_change = 1)`,
+			)
+			.bind(choice, choiceLabel, now, promptId),
+		promptSelect(db, promptId),
+	]);
+	const before = firstRow<{ status: string }>(results, 0);
+	if (!before) return null;
+	const row = firstRow<PromptRow>(results, 3);
+	if (!row) return null;
+	return {
+		prompt: toPrompt(row),
+		alreadyAnswered: before.status === "answered",
+		applied: (results[2].meta.changes ?? 0) > 0,
+	};
 }
 
 export async function listPrompts(

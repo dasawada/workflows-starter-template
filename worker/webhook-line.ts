@@ -20,11 +20,25 @@ import {
 	upsertConversation,
 } from "./db";
 import { inboxStub } from "./inbox-do";
+import { recordMetric } from "./metrics";
+
+/** 丟進 Queues 的訊息內容 */
+export interface LineEventJob {
+	event: LineWebhookEvent;
+	receivedAt: number;
+}
+
+export function lineClientFor(env: Env): LineClient {
+	return new LineClient(env.LINE_CHANNEL_ACCESS_TOKEN, (endpoint, status, ms) =>
+		recordMetric(env, { name: "line.api", labels: [endpoint, String(status)], values: [ms] }),
+	);
+}
 
 /**
  * POST /webhook/line
  * 1. 驗簽章（失敗一律 401，避免偽造）
- * 2. 逐一處理事件；單一事件失敗不影響其他事件，最後回 200 讓 LINE 不要重送
+ * 2. WEBHOOK_MODE=queue 且有 LINE_EVENTS binding：事件丟進 Queues 後立即回 200，由 queue() 消費（自帶重試與削峰）
+ *    否則同步逐一處理；單一事件失敗不影響其他事件，最後回 200 讓 LINE 不要重送
  * 3. 媒體下載放到 waitUntil，不拖慢回應
  */
 export async function handleLineWebhook(
@@ -56,16 +70,72 @@ export async function handleLineWebhook(
 		return Response.json({ error: "Invalid JSON" }, { status: 400 });
 	}
 
-	const client = new LineClient(env.LINE_CHANNEL_ACCESS_TOKEN);
-	for (const event of body.events ?? []) {
-		try {
-			await handleEvent(event, env, ctx, client);
-		} catch (err) {
-			console.error("LINE event failed", event.type, err);
+	const events = body.events ?? [];
+	const useQueue = (env.WEBHOOK_MODE as string) === "queue" && env.LINE_EVENTS;
+	recordMetric(env, { name: "webhook.received", labels: [useQueue ? "queue" : "inline"], values: [events.length] });
+
+	if (useQueue && events.length) {
+		const receivedAt = Date.now();
+		// sendBatch 一次最多 100 則
+		for (let i = 0; i < events.length; i += 100) {
+			await env.LINE_EVENTS.sendBatch(
+				events.slice(i, i + 100).map((event) => ({ body: { event, receivedAt } satisfies LineEventJob })),
+			);
 		}
+		return Response.json({ ok: true, queued: events.length });
 	}
 
+	const client = lineClientFor(env);
+	for (const event of events) {
+		await processLineEvent(event, env, ctx, client);
+	}
 	return Response.json({ ok: true });
+}
+
+/** 處理單一事件並記錄耗時；錯誤會往上丟，讓 queue 消費者決定是否重試 */
+export async function processLineEvent(
+	event: LineWebhookEvent,
+	env: Env,
+	ctx: ExecutionContext,
+	client: LineClient,
+	options: { rethrow?: boolean } = {},
+): Promise<void> {
+	const start = Date.now();
+	try {
+		await handleEvent(event, env, ctx, client);
+		recordMetric(env, { name: "line.event", labels: [event.type, "ok"], values: [Date.now() - start] });
+	} catch (err) {
+		recordMetric(env, { name: "line.event", labels: [event.type, "error"], values: [Date.now() - start] });
+		console.error("LINE event failed", event.type, err);
+		if (options.rethrow) throw err;
+	}
+}
+
+/**
+ * Queues 消費者：每則訊息獨立 ack / retry。
+ * 重送安全：訊息靠 external_id、postback 靠 webhookEventId、follow/unfollow 靠 webhookEventId 去重。
+ */
+export async function consumeLineEvents(
+	batch: MessageBatch<LineEventJob>,
+	env: Env,
+	ctx: ExecutionContext,
+): Promise<void> {
+	const client = lineClientFor(env);
+	for (const msg of batch.messages) {
+		const start = Date.now();
+		try {
+			await processLineEvent(msg.body.event, env, ctx, client, { rethrow: true });
+			msg.ack();
+			recordMetric(env, {
+				name: "queue.consume",
+				labels: ["ok"],
+				values: [Date.now() - start, msg.attempts, start - msg.body.receivedAt],
+			});
+		} catch {
+			msg.retry({ delaySeconds: Math.min(60, 5 * msg.attempts) });
+			recordMetric(env, { name: "queue.consume", labels: ["retry"], values: [Date.now() - start, msg.attempts] });
+		}
+	}
 }
 
 async function handleEvent(
@@ -101,6 +171,8 @@ async function handleEvent(
 				env,
 				target,
 				client,
+				false,
+				event.webhookEventId ? `evt:${event.webhookEventId}` : null,
 			);
 			return;
 		default:
@@ -444,6 +516,7 @@ async function handleFollow(
 		target,
 		client,
 		true,
+		event.webhookEventId ? `evt:${event.webhookEventId}` : null,
 	);
 
 	const welcome = env.WELCOME_MESSAGE?.trim();
@@ -480,6 +553,7 @@ async function recordSystemMessage(
 	target: Target,
 	client: LineClient,
 	alreadyEnsured = false,
+	externalId: string | null = null,
 ): Promise<void> {
 	if (!alreadyEnsured) {
 		await ensureConversation(
@@ -497,6 +571,7 @@ async function recordSystemMessage(
 		sender: "system",
 		type: "text",
 		text,
+		externalId,
 		createdAt: timestamp,
 	});
 	if (inserted) {

@@ -298,10 +298,15 @@ export function toMessageType(type: string): MessageType {
 
 // ---------- API 呼叫 ----------
 
+/** 每次呼叫 LINE API 的回報：endpoint 是去掉 id 的路徑樣式，方便彙總 */
+export type LineCallHook = (endpoint: string, status: number, durationMs: number) => void;
+
 export class LineClient {
 	private readonly accessToken: string;
-	constructor(accessToken: string) {
+	private readonly onCall?: LineCallHook;
+	constructor(accessToken: string, onCall?: LineCallHook) {
 		this.accessToken = accessToken;
+		this.onCall = onCall;
 	}
 
 	private headers(extra: Record<string, string> = {}): HeadersInit {
@@ -311,6 +316,18 @@ export class LineClient {
 		};
 	}
 
+	private async request(endpoint: string, url: string, init: RequestInit = {}): Promise<Response> {
+		const start = Date.now();
+		let status = 0;
+		try {
+			const res = await fetch(url, { ...init, headers: this.headers(init.headers as Record<string, string>) });
+			status = res.status;
+			return res;
+		} finally {
+			this.onCall?.(endpoint, status, Date.now() - start);
+		}
+	}
+
 	async getProfile(
 		userId: string,
 		groupOrRoom?: { kind: "group" | "room"; id: string },
@@ -318,7 +335,7 @@ export class LineClient {
 		const url = groupOrRoom
 			? `${LINE_API}/${groupOrRoom.kind}/${groupOrRoom.id}/member/${userId}`
 			: `${LINE_API}/profile/${userId}`;
-		const res = await fetch(url, { headers: this.headers() });
+		const res = await this.request(groupOrRoom ? "member-profile" : "profile", url);
 		if (!res.ok) return null;
 		return (await res.json()) as { displayName: string; pictureUrl?: string };
 	}
@@ -328,9 +345,7 @@ export class LineClient {
 		id: string,
 	): Promise<{ groupName?: string; pictureUrl?: string } | null> {
 		if (kind !== "group") return null;
-		const res = await fetch(`${LINE_API}/group/${id}/summary`, {
-			headers: this.headers(),
-		});
+		const res = await this.request("group-summary", `${LINE_API}/group/${id}/summary`);
 		if (!res.ok) return null;
 		return (await res.json()) as { groupName: string; pictureUrl?: string };
 	}
@@ -340,9 +355,9 @@ export class LineClient {
 	}
 
 	async push(to: string, messages: unknown[]): Promise<void> {
-		const res = await fetch(`${LINE_API}/message/push`, {
+		const res = await this.request("push", `${LINE_API}/message/push`, {
 			method: "POST",
-			headers: this.headers({ "Content-Type": "application/json" }),
+			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ to, messages }),
 		});
 		if (!res.ok) {
@@ -351,9 +366,9 @@ export class LineClient {
 	}
 
 	async reply(replyToken: string, messages: unknown[]): Promise<void> {
-		const res = await fetch(`${LINE_API}/message/reply`, {
+		const res = await this.request("reply", `${LINE_API}/message/reply`, {
 			method: "POST",
-			headers: this.headers({ "Content-Type": "application/json" }),
+			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ replyToken, messages }),
 		});
 		if (!res.ok) {
@@ -365,9 +380,7 @@ export class LineClient {
 	async getContent(
 		messageId: string,
 	): Promise<{ body: ReadableStream; contentType: string } | null> {
-		const res = await fetch(`${LINE_DATA_API}/message/${messageId}/content`, {
-			headers: this.headers(),
-		});
+		const res = await this.request("content", `${LINE_DATA_API}/message/${messageId}/content`);
 		if (!res.ok || !res.body) return null;
 		return {
 			body: res.body,

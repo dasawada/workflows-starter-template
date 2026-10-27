@@ -43,6 +43,29 @@ else
     echo "!! 無法建立 R2，請在 dashboard（R2 Object Storage）手動建立名為 $BUCKET_NAME 的 bucket 後重試"; exit 1; }
 fi
 
+echo "== Queues: cs-console-line-events（需 Workers Paid）"
+QUEUES_OK=1
+for Q in cs-console-line-events cs-console-line-events-dlq; do
+  if npx wrangler queues info "$Q" >/dev/null 2>&1; then
+    echo "   $Q 已存在"
+  elif npx wrangler queues create "$Q" >/dev/null 2>&1; then
+    echo "   已建立 $Q"
+  else
+    QUEUES_OK=0
+  fi
+done
+if [ "$QUEUES_OK" = "0" ]; then
+  echo "!! 無法建立 Queues（通常是免費方案）。改以 inline 模式部署：從部署設定移除 queues 並設 WEBHOOK_MODE=inline"
+  node -e '
+    const fs=require("fs");
+    for(const d of fs.existsSync("dist")?fs.readdirSync("dist"):[]){
+      const p=`dist/${d}/wrangler.json`; if(!fs.existsSync(p)) continue;
+      const cfg=JSON.parse(fs.readFileSync(p,"utf8"));
+      delete cfg.queues; cfg.vars={...(cfg.vars||{}),WEBHOOK_MODE:"inline"};
+      fs.writeFileSync(p,JSON.stringify(cfg));
+    }'
+fi
+
 if [ ! -d dist/client ]; then
   echo "== dist 不存在，先建置"
   npm run build

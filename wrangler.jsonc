@@ -18,6 +18,12 @@
 		"enabled": true
 	},
 	/**
+	 * Smart Placement：讓 Worker 搬到 D1 旁執行，一次請求做多次查詢時省掉跨區往返
+	 */
+	"placement": {
+		"mode": "smart"
+	},
+	/**
 	 * 非機密設定值。機密（LINE 金鑰、客服台登入 token）請勿寫在這裡：
 	 * - 本機：寫在 .dev.vars（見 .dev.vars.example）
 	 * - 正式：wrangler secret put <NAME>
@@ -26,8 +32,39 @@
 		// 客服多久沒回覆就標記「待處理」並推播提醒（分鐘）
 		"REPLY_SLA_MINUTES": "10",
 		// 使用者加好友時自動回覆的歡迎詞，留空則不送
-		"WELCOME_MESSAGE": "您好，感謝加入好友！請直接留言，客服人員會盡快回覆您。"
+		"WELCOME_MESSAGE": "您好，感謝加入好友！請直接留言，客服人員會盡快回覆您。",
+		// webhook 處理方式：queue = 驗簽後丟進 Queues 立即回 200（需 Workers Paid）；inline = 同步處理
+		"WEBHOOK_MODE": "queue"
 	},
+	/**
+	 * Queues：webhook 削峰與重試。免費方案沒有 Queues，bootstrap 建不出來時會自動從部署設定移除並改走 inline
+	 */
+	"queues": {
+		"producers": [
+			{
+				"binding": "LINE_EVENTS",
+				"queue": "cs-console-line-events"
+			}
+		],
+		"consumers": [
+			{
+				"queue": "cs-console-line-events",
+				"max_batch_size": 20,
+				"max_batch_timeout": 1,
+				"max_retries": 3,
+				"dead_letter_queue": "cs-console-line-events-dlq"
+			}
+		]
+	},
+	/**
+	 * Analytics Engine：處理時間、LINE API 狀態等指標，在 dashboard 用 SQL 查
+	 */
+	"analytics_engine_datasets": [
+		{
+			"binding": "METRICS",
+			"dataset": "cs_console_metrics"
+		}
+	],
 	/**
 	 * D1：對話與訊息的永久儲存
 	 * database_id 是資源識別碼（非密鑰），由 scripts/bootstrap.sh 建立資料庫後寫入

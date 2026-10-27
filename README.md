@@ -114,9 +114,35 @@ npm run deploy
 
 ## 規模與效能
 
+- **webhook 削峰**：預設 `WEBHOOK_MODE=queue`，驗完簽章就把事件丟進 Cloudflare Queues 立即回 200，由同一個 Worker 的 `queue()` 消費，失敗自動重試 3 次後進 dead letter queue。Queues 需要 Workers Paid；免費方案下 `scripts/bootstrap.sh` 建不出 queue 時會自動從部署設定移除並改走 `inline`（同步處理），功能不變。
+- **Smart Placement**：`wrangler.jsonc` 開了 `placement.mode = smart`，Worker 會搬到 D1 所在地區執行，一次請求做多次查詢時省掉跨區往返。
+- **D1 單次往返**：寫訊息、更新對話、回讀結果合併成一次 `batch`，LINE 重送時以 SQL 條件避免重複累加未讀。
+- **WebSocket ping**：Durable Object 用 `setWebSocketAutoResponse` 讓平台直接回 pong，前端心跳不會喚醒 DO。
+
 - 對話清單用虛擬捲動，只渲染畫面上看得到的列，捲到底才向後端要下一頁（每頁 50 筆，記憶體最多保留 1000 筆）。對話總數再多也不影響畫面流暢度。
 - 未讀總數與逾時數由後端 `/api/stats` 一次算出，不靠前端加總。
 - 成本只與訊息數線性相關：每則訊息約 3 次 D1 寫入；Durable Object 只有一個且閒置休眠；逾時提醒 Workflow 每個對話同時最多一個實例，客服回覆或逾時即結束。對話開著多久都不會額外計費。
+
+## 監控
+
+所有指標寫進 Analytics Engine 資料集 `cs_console_metrics`（dashboard → Analytics & Logs → Analytics Engine，或用 SQL API 接 Grafana）。欄位：`blob1` 指標名、`blob2…` 標籤、`double1…` 數值。
+
+| 指標 | 標籤 | 數值 |
+| --- | --- | --- |
+| `http.request` | 路由、方法、狀態碼 | 耗時 ms |
+| `webhook.received` | queue 或 inline | 事件數 |
+| `line.event` | 事件類型、ok 或 error | 處理耗時 ms |
+| `line.api` | endpoint（profile、push、reply、content…）、HTTP 狀態 | 耗時 ms |
+| `queue.consume` | ok 或 retry | 耗時 ms、第幾次嘗試、排隊等待 ms |
+
+範例：過去一天各 LINE API 的錯誤率與平均耗時
+
+```sql
+SELECT blob2 AS endpoint, blob3 AS status, count() AS calls, avg(double1) AS avg_ms
+FROM cs_console_metrics
+WHERE blob1 = 'line.api' AND timestamp > NOW() - INTERVAL '1' DAY
+GROUP BY endpoint, status ORDER BY calls DESC
+```
 
 ## 已知限制
 

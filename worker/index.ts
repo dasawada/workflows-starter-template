@@ -2,10 +2,10 @@ export { ReplyReminderWorkflow } from "./workflow";
 export { InboxDO } from "./inbox-do";
 
 import { isAuthorized, unauthorized } from "./auth";
-import { handleLineWebhook } from "./webhook-line";
+import { consumeLineEvents, handleLineWebhook, lineClientFor, type LineEventJob } from "./webhook-line";
+import { recordMetric } from "./metrics";
 import { inboxStub } from "./inbox-do";
 import {
-	LineClient,
 	TEXT_MESSAGE_MAX,
 	buildPromptMessages,
 	instrumentPostbacks,
@@ -52,6 +52,31 @@ import type {
  */
 export default {
 	async fetch(request, env, ctx): Promise<Response> {
+		const start = Date.now();
+		const url = new URL(request.url);
+		const response = await route(request, env, ctx);
+		if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/webhook/")) {
+			recordMetric(env, {
+				name: "http.request",
+				labels: [routeLabel(url.pathname), request.method, String(response.status)],
+				values: [Date.now() - start],
+			});
+		}
+		return response;
+	},
+
+	async queue(batch, env, ctx): Promise<void> {
+		await consumeLineEvents(batch as MessageBatch<LineEventJob>, env, ctx);
+	},
+} satisfies ExportedHandler<Env, LineEventJob>;
+
+/** 把 /api/conversations/line:U123/reply 之類的路徑化成 /api/conversations/:id/reply，方便彙總 */
+function routeLabel(pathname: string): string {
+	return pathname.replace(/^\/api\/conversations\/[^/]+/, "/api/conversations/:id").replace(/^\/api\/media\/.+$/, "/api/media/:key");
+}
+
+async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+	{
 		const url = new URL(request.url);
 		const { pathname } = url;
 
@@ -177,8 +202,8 @@ export default {
 		}
 
 		return Response.json({ error: "Not Found" }, { status: 404 });
-	},
-} satisfies ExportedHandler<Env>;
+	}
+}
 
 async function handleReply(
 	request: Request,
@@ -204,7 +229,7 @@ async function handleReply(
 	}
 
 	try {
-		await new LineClient(env.LINE_CHANNEL_ACCESS_TOKEN).pushText(recipientId, text);
+		await lineClientFor(env).pushText(recipientId, text);
 	} catch (err) {
 		console.error("push failed", err);
 		return Response.json(
@@ -352,7 +377,7 @@ async function sendTracked(
 	const now = Date.now();
 
 	try {
-		await new LineClient(env.LINE_CHANNEL_ACCESS_TOKEN).push(input.recipientId, messages);
+		await lineClientFor(env).push(input.recipientId, messages);
 	} catch (err) {
 		console.error("push failed", err);
 		return Response.json(
