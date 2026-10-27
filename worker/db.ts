@@ -459,16 +459,31 @@ export async function clearMarkAsReadToken(
 		.run();
 }
 
-/** 依 LINE message id 找本地訊息（引用訊息用） */
+/**
+ * 依 LINE message id 找本地訊息（引用訊息用）。
+ * 使用者的訊息 external_id 就是 LINE id；我方一次推送多則時只有第一則在 external_id，
+ * 其餘在 metadata.lineMessageIds，所以在同一個對話內再查一次 JSON 陣列。
+ */
 export async function findMessageByExternalId(
 	db: D1Database,
 	externalId: string,
+	conversationId?: string,
 ): Promise<Message | null> {
 	const row = await db
 		.prepare("SELECT * FROM messages WHERE external_id = ?")
 		.bind(externalId)
 		.first<MessageRow>();
-	return row ? toMessage(row) : null;
+	if (row) return toMessage(row);
+	if (!conversationId) return null;
+	const inJson = await db
+		.prepare(
+			`SELECT * FROM messages WHERE conversation_id = ? AND direction = 'outbound'
+			   AND EXISTS (SELECT 1 FROM json_each(json_extract(metadata, '$.lineMessageIds')) WHERE value = ?)
+			 LIMIT 1`,
+		)
+		.bind(conversationId, externalId)
+		.first<MessageRow>();
+	return inJson ? toMessage(inJson) : null;
 }
 
 /**
@@ -799,24 +814,52 @@ export async function getMessage(db: D1Database, id: string): Promise<Message | 
 	return row ? toMessage(row) : null;
 }
 
-/** 更新客服訊息的送達狀態；失敗原因與 LINE request id 一併記進 metadata */
+/**
+ * 更新客服訊息的送達狀態；失敗原因與 LINE request id 一併記進 metadata。
+ * LINE 回的 sentMessages 有值時：第一則的 id 寫進 external_id（引用查詢用），全部 id 與 quoteToken 存進 metadata。
+ */
 export async function setDeliveryStatus(
 	db: D1Database,
 	messageId: string,
 	status: DeliveryStatus,
-	extra: { error?: string | null; lineRequestId?: string | null; lineStatus?: number | null } = {},
+	extra: {
+		error?: string | null;
+		lineRequestId?: string | null;
+		lineStatus?: number | null;
+		sentMessages?: { id: string; quoteToken?: string }[];
+	} = {},
 ): Promise<Message | null> {
-	const results = await db.batch([
-		db
-			.prepare(
-				`UPDATE messages SET delivery_status = ?,
-					metadata = json_set(COALESCE(metadata, '{}'),
-						'$.deliveryError', ?, '$.lineRequestId', ?, '$.lineStatus', ?, '$.deliveryUpdatedAt', ?)
-				 WHERE id = ?`,
-			)
-			.bind(status, extra.error ?? null, extra.lineRequestId ?? null, extra.lineStatus ?? null, Date.now(), messageId),
-		db.prepare("SELECT * FROM messages WHERE id = ?").bind(messageId),
-	]);
+	const sent = extra.sentMessages ?? [];
+	const update = sent.length
+		? db
+				.prepare(
+					`UPDATE messages SET delivery_status = ?,
+						external_id = COALESCE(external_id, ?),
+						metadata = json_set(COALESCE(metadata, '{}'),
+							'$.deliveryError', ?, '$.lineRequestId', ?, '$.lineStatus', ?, '$.deliveryUpdatedAt', ?,
+							'$.lineMessageIds', json(?), '$.quoteToken', ?)
+					 WHERE id = ?`,
+				)
+				.bind(
+					status,
+					sent[0].id,
+					extra.error ?? null,
+					extra.lineRequestId ?? null,
+					extra.lineStatus ?? null,
+					Date.now(),
+					JSON.stringify(sent.map((m) => m.id)),
+					sent[0].quoteToken ?? null,
+					messageId,
+				)
+		: db
+				.prepare(
+					`UPDATE messages SET delivery_status = ?,
+						metadata = json_set(COALESCE(metadata, '{}'),
+							'$.deliveryError', ?, '$.lineRequestId', ?, '$.lineStatus', ?, '$.deliveryUpdatedAt', ?)
+					 WHERE id = ?`,
+				)
+				.bind(status, extra.error ?? null, extra.lineRequestId ?? null, extra.lineStatus ?? null, Date.now(), messageId);
+	const results = await db.batch([update, db.prepare("SELECT * FROM messages WHERE id = ?").bind(messageId)]);
 	const row = firstRow<MessageRow>(results, 1);
 	return row ? toMessage(row) : null;
 }

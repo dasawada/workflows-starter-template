@@ -105,7 +105,7 @@ describe("outbox: retry key and delivery status", () => {
 		const seen: string[] = [];
 		mockLine("POST", "/v2/bot/message/push", (req) => {
 			seen.push(req.headers.get("X-Line-Retry-Key") ?? "");
-			return Response.json({}, { headers: { "x-line-request-id": "req-1" } });
+			return Response.json({ sentMessages: [{ id: "L-out-1", quoteToken: "qt-out-1" }] }, { headers: { "x-line-request-id": "req-1" } });
 		});
 		const key = "11111111-2222-4333-8444-555555555555";
 		const first = await reply("line:U-ob1", { text: "第一次", clientKey: key });
@@ -117,6 +117,8 @@ describe("outbox: retry key and delivery status", () => {
 		expect(seen).toEqual([key]);
 		expect(a.message.deliveryStatus).toBe("sent");
 		expect(a.message.metadata?.lineRequestId).toBe("req-1");
+		expect(a.message.externalId).toBe("L-out-1");
+		expect(a.message.metadata).toMatchObject({ lineMessageIds: ["L-out-1"], quoteToken: "qt-out-1" });
 		expect(b.reused).toBe(true);
 		expect(b.message.id).toBe(a.message.id);
 		expect((await messagesOf("line:U-ob1")).filter((m) => m.sender === "agent")).toHaveLength(1);
@@ -171,6 +173,34 @@ describe("outbox: retry key and delivery status", () => {
 		await maintenance();
 		expect((await messagesOf("line:U-ob4")).find((x) => x.id === message.id)!.deliveryStatus).toBe("unknown");
 		expect((await openEvents("send_unknown")).some((e) => e.messageId === message.id)).toBe(true);
+	});
+});
+
+describe("quoting console-sent messages", () => {
+	it("resolves a quote of an agent reply, including the 2nd message of a multi-message push", async () => {
+		await seedUser("U-quote-agent", "Quoter");
+		mockLine("POST", "/v2/bot/message/push", lineJson({ sentMessages: [{ id: "L-a1", quoteToken: "q1" }] }));
+		await reply("line:U-quote-agent", { text: "請問要寄到台北還是新竹？" }, asAgent("小美"));
+		mockLine("POST", "/v2/bot/message/push", lineJson({ sentMessages: [{ id: "L-b1" }, { id: "L-b2", quoteToken: "q2" }] }));
+		await SELF.fetch("https://console.test/api/conversations/line%3AU-quote-agent/send", {
+			method: "POST",
+			headers: asAgent("小美"),
+			body: JSON.stringify({ messages: [{ type: "text", text: "另外" }, { type: "text", text: "運費 60 元" }] }),
+		});
+
+		mockLine("GET", "/v2/bot/profile/U-quote-agent", lineJson({ displayName: "Quoter" }), 2);
+		await postWebhook([
+			{ ...textEvent("U-quote-agent", "新竹", "m-qa-1"), message: { id: "m-qa-1", type: "text", text: "新竹", quotedMessageId: "L-a1" } },
+			{ ...textEvent("U-quote-agent", "運費可以免嗎", "m-qa-2"), message: { id: "m-qa-2", type: "text", text: "運費可以免嗎", quotedMessageId: "L-b2" } },
+		]);
+		const msgs = await messagesOf("line:U-quote-agent");
+		const q1 = msgs.find((m) => m.externalId === "m-qa-1")!;
+		const q2 = msgs.find((m) => m.externalId === "m-qa-2")!;
+		expect(q1.metadata?.quote).toMatchObject({ externalId: "L-a1", text: "請問要寄到台北還是新竹？", sender: "agent" });
+		expect((q1.metadata?.quote as { messageId: string }).messageId).toBeTruthy();
+		expect(q2.metadata?.quote).toMatchObject({ externalId: "L-b2", sender: "agent" });
+		expect((q2.metadata?.quote as { text: string }).text).toContain("運費 60 元");
+		expect((await openEvents("quote_missing")).some((e) => e.conversationId === "line:U-quote-agent")).toBe(false);
 	});
 });
 

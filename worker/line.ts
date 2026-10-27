@@ -428,15 +428,18 @@ export class LineClient {
 		}
 	}
 
-	async reply(replyToken: string, messages: unknown[]): Promise<void> {
+	/** Reply API：失敗丟例外；成功回傳 sentMessages，呼叫端要把 id 存回本地訊息 */
+	async reply(replyToken: string, messages: unknown[]): Promise<LineSentMessage[]> {
 		const res = await this.request("reply", `${LINE_API}/message/reply`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ replyToken, messages }),
 		});
-		if (!res.ok) {
-			throw new Error(`LINE reply failed (${res.status}): ${await res.text()}`);
+		const result = await sendResult(res);
+		if (!result.ok) {
+			throw new Error(`LINE reply failed (${res.status}): ${result.error ?? ""}`);
 		}
+		return result.sentMessages;
 	}
 
 	/**
@@ -483,6 +486,12 @@ export class LineClient {
 	}
 }
 
+/** LINE 對每則送出的訊息回的識別資料；quoteToken 讓我方之後可以引用這則訊息 */
+export interface LineSentMessage {
+	id: string;
+	quoteToken?: string;
+}
+
 export interface LineSendResult {
 	ok: boolean;
 	status: number;
@@ -490,19 +499,39 @@ export interface LineSendResult {
 	error: string | null;
 	/** 5xx、429、網路錯誤：值得稍後重試 */
 	transient: boolean;
+	/**
+	 * 成功（或 409 重試鍵已被接受）時 LINE 回的 sentMessages。
+	 * 一定要存回本地訊息：使用者引用我方訊息時，webhook 只給這個 id，本地沒有就會顯示「原文無法取得」。
+	 */
+	sentMessages: LineSentMessage[];
 }
 
 async function sendResult(res: Response): Promise<LineSendResult> {
 	const requestId = res.headers.get("x-line-request-id");
-	if (res.ok) return { ok: true, status: res.status, requestId, error: null, transient: false };
-	let error = `LINE API ${res.status}`;
+	let text = "";
 	try {
-		const text = await res.text();
-		if (text) error = `${error}: ${text.slice(0, 500)}`;
+		text = await res.text();
 	} catch {
 		// ignore
 	}
-	return { ok: false, status: res.status, requestId, error, transient: res.status === 429 || res.status >= 500 };
+	const sentMessages = parseSentMessages(text);
+	if (res.ok) return { ok: true, status: res.status, requestId, error: null, transient: false, sentMessages };
+	let error = `LINE API ${res.status}`;
+	if (text) error = `${error}: ${text.slice(0, 500)}`;
+	return { ok: false, status: res.status, requestId, error, transient: res.status === 429 || res.status >= 500, sentMessages };
+}
+
+function parseSentMessages(text: string): LineSentMessage[] {
+	if (!text) return [];
+	try {
+		const data = JSON.parse(text) as { sentMessages?: unknown };
+		if (!Array.isArray(data.sentMessages)) return [];
+		return data.sentMessages
+			.filter((m): m is { id: string; quoteToken?: string } => isObject(m) && typeof m.id === "string")
+			.map((m) => ({ id: m.id, quoteToken: typeof m.quoteToken === "string" ? m.quoteToken : undefined }));
+	} catch {
+		return [];
+	}
 }
 
 /** 電話號碼 → E.164 → SHA-256 hex（PNP 的 to 欄位）。只回傳 hash 與遮罩，明碼不落地。 */

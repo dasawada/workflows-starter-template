@@ -123,10 +123,11 @@ export async function pushOutboundMessage(
 
 	let updated: Message | null;
 	if (result.ok || result.status === 409) {
-		// 409：同一把 retry key 先前已被 LINE 接受，代表早就送達
+		// 409：同一把 retry key 先前已被 LINE 接受，代表早就送達（回應也會帶原本的 sentMessages）
 		updated = await setDeliveryStatus(env.DB, message.id, "sent", {
 			lineRequestId: result.requestId,
 			lineStatus: result.status,
+			sentMessages: result.sentMessages,
 		});
 		if (message.deliveryStatus === "failed" || message.deliveryStatus === "unknown") {
 			await resolveIntegrity(env, `send_unknown:${message.id}`, "重新推送後 LINE 確認已送達");

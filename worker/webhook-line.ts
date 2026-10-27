@@ -280,7 +280,7 @@ async function handleMessage(
 			if (t.quoteToken || t.quotedMessageId || t.mention) {
 				metadata = {};
 				if (t.quoteToken) metadata.quoteToken = t.quoteToken;
-				if (t.quotedMessageId) metadata.quote = await resolveQuote(env, t.quotedMessageId);
+				if (t.quotedMessageId) metadata.quote = await resolveQuote(env, target.conversationId, t.quotedMessageId);
 				if (t.mention) metadata.mention = t.mention;
 			}
 			break;
@@ -405,8 +405,8 @@ async function handleMessage(
  * 引用訊息：LINE 只給 quotedMessageId，不給原文。本地找得到就做快照，找不到也要留關聯並明確標示，
  * 讓客服知道「這是在回某則我們沒有的訊息」，而不是只看到一句沒頭沒尾的話。
  */
-async function resolveQuote(env: Env, quotedMessageId: string): Promise<MessageQuote> {
-	const original = await findMessageByExternalId(env.DB, quotedMessageId);
+async function resolveQuote(env: Env, conversationId: string, quotedMessageId: string): Promise<MessageQuote> {
+	const original = await findMessageByExternalId(env.DB, quotedMessageId, conversationId);
 	if (!original) {
 		return { externalId: quotedMessageId, messageId: null, text: null, type: null, sender: null };
 	}
@@ -535,7 +535,7 @@ async function handlePostback(
 				? `已更新您的選擇為「${label}」。`
 				: `已收到您的選擇「${label}」，謝謝。`;
 		try {
-			await client.reply(event.replyToken, [{ type: "text", text }]);
+			const sent = await client.reply(event.replyToken, [{ type: "text", text }]);
 			await insertMessage(env.DB, {
 				id: crypto.randomUUID(),
 				conversationId: target.conversationId,
@@ -546,6 +546,8 @@ async function handlePostback(
 				createdAt: now + 1,
 				source: "system",
 				deliveryStatus: "sent",
+				externalId: sent[0]?.id ?? null,
+				metadata: sent.length ? { lineMessageIds: sent.map((m) => m.id), quoteToken: sent[0].quoteToken ?? null } : null,
 			});
 		} catch (err) {
 			console.error("postback reply failed", err);
@@ -615,7 +617,7 @@ async function handleFollow(
 	const welcome = env.WELCOME_MESSAGE?.trim();
 	if (welcome && event.replyToken) {
 		try {
-			await client.reply(event.replyToken, [{ type: "text", text: welcome }]);
+			const sent = await client.reply(event.replyToken, [{ type: "text", text: welcome }]);
 			const inserted = await insertMessage(env.DB, {
 				id: crypto.randomUUID(),
 				conversationId: target.conversationId,
@@ -626,6 +628,8 @@ async function handleFollow(
 				createdAt: now + 1,
 				source: "system",
 				deliveryStatus: "sent",
+				externalId: sent[0]?.id ?? null,
+				metadata: sent.length ? { lineMessageIds: sent.map((m) => m.id), quoteToken: sent[0].quoteToken ?? null } : null,
 			});
 			if (inserted) {
 				await inboxStub(env).broadcast({
