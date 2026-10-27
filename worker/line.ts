@@ -182,6 +182,90 @@ export function buildPromptMessages(input: {
 	return messages;
 }
 
+const ALLOWED_MESSAGE_TYPES = new Set([
+	"text",
+	"sticker",
+	"image",
+	"video",
+	"audio",
+	"location",
+	"imagemap",
+	"template",
+	"flex",
+]);
+export const MAX_MESSAGES_PER_PUSH = 5;
+export const POSTBACK_DATA_MAX = 300;
+
+type Json = Record<string, unknown>;
+const isObject = (v: unknown): v is Json => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** 基本結構檢查；細節交給 LINE API 驗證並把錯誤回給客服台 */
+export function validateLineMessages(raw: unknown): { ok: true; messages: Json[] } | { ok: false; error: string } {
+	if (!Array.isArray(raw) || raw.length === 0) return { ok: false, error: "messages 必須是非空陣列" };
+	if (raw.length > MAX_MESSAGES_PER_PUSH) return { ok: false, error: `一次最多 ${MAX_MESSAGES_PER_PUSH} 則訊息` };
+	for (const [i, m] of raw.entries()) {
+		if (!isObject(m) || typeof m.type !== "string") return { ok: false, error: `第 ${i + 1} 則缺少 type` };
+		if (!ALLOWED_MESSAGE_TYPES.has(m.type)) return { ok: false, error: `第 ${i + 1} 則的 type「${m.type}」不支援` };
+		if ((m.type === "template" || m.type === "flex") && typeof m.altText !== "string") {
+			return { ok: false, error: `第 ${i + 1} 則（${m.type}）需要 altText` };
+		}
+	}
+	return { ok: true, messages: raw as Json[] };
+}
+
+/**
+ * 走訪訊息內所有 postback action，把 data 改寫成 prompt=<id>&choice=<value>。
+ * value 取原本的 data（若有）否則取 label / displayText；回傳可供追蹤的選項清單。
+ * 同一個 value 出現多次（例如 carousel 每張卡都有「承接」）會合併成一個選項。
+ */
+export function instrumentPostbacks(
+	messages: Json[],
+	promptId: string,
+): { messages: Json[]; options: { label: string; value: string }[] } {
+	const options: { label: string; value: string }[] = [];
+	const seen = new Set<string>();
+	let counter = 0;
+
+	const visit = (node: unknown): unknown => {
+		if (Array.isArray(node)) return node.map(visit);
+		if (!isObject(node)) return node;
+		const out: Json = {};
+		for (const [k, v] of Object.entries(node)) out[k] = visit(v);
+		if (out.type === "postback") {
+			const label =
+				(typeof out.label === "string" && out.label) ||
+				(typeof out.displayText === "string" && out.displayText) ||
+				`選項${++counter}`;
+			let value = typeof out.data === "string" && out.data.trim() ? out.data.trim() : label;
+			if (value.startsWith("prompt=")) {
+				const parsed = parsePromptPostback(value);
+				value = parsed?.choice ?? value;
+			}
+			value = value.slice(0, 50);
+			if (!seen.has(value)) {
+				seen.add(value);
+				options.push({ label: label.slice(0, 20), value });
+			}
+			out.data = new URLSearchParams({ prompt: promptId, choice: value }).toString();
+		}
+		return out;
+	};
+
+	return { messages: visit(messages) as Json[], options };
+}
+
+/** 從訊息陣列取一段摘要文字，給對話清單與追蹤面板顯示 */
+export function summarizeMessages(messages: Json[]): { body: string | null; question: string } {
+	const texts: string[] = [];
+	let alt: string | null = null;
+	for (const m of messages) {
+		if (m.type === "text" && typeof m.text === "string") texts.push(m.text);
+		else if (typeof m.altText === "string" && !alt) alt = m.altText;
+	}
+	const body = texts.length ? texts.join("\n\n") : null;
+	return { body, question: alt ?? texts[0]?.slice(0, 240) ?? "互動訊息" };
+}
+
 /** 解析 postback data；不是我們送出的格式就回 null */
 export function parsePromptPostback(
 	data: string,

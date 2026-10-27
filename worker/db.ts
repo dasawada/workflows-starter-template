@@ -209,6 +209,7 @@ export function previewText(type: MessageType, text: string | null): string {
 		sticker: "[貼圖]",
 		location: "[位置]",
 		prompt: "[選擇題]",
+		rich: "[互動訊息]",
 		unknown: "[不支援的訊息]",
 	};
 	return labels[type] || "";
@@ -417,6 +418,7 @@ interface PromptRow {
 	choice_label: string | null;
 	responded_at: number | null;
 	created_at: number;
+	payload?: string | null;
 	display_name?: string | null;
 }
 
@@ -444,6 +446,7 @@ function toPrompt(row: PromptRow): Prompt {
 		choiceLabel: row.choice_label,
 		respondedAt: row.responded_at,
 		createdAt: row.created_at,
+		payload: parseJson<unknown[] | null>(row.payload ?? null, null),
 		displayName: row.display_name ?? undefined,
 	};
 }
@@ -459,14 +462,15 @@ export async function createPrompt(
 		question: string;
 		options: PromptOption[];
 		variables?: Record<string, string> | null;
+		payload?: unknown[] | null;
 		createdAt: number;
 	},
 ): Promise<Prompt> {
 	await db
 		.prepare(
 			`INSERT INTO prompts
-			 (id, conversation_id, message_id, template_key, body, question, options, variables, status, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+			 (id, conversation_id, message_id, template_key, body, question, options, variables, payload, status, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
 		)
 		.bind(
 			input.id,
@@ -477,6 +481,7 @@ export async function createPrompt(
 			input.question,
 			JSON.stringify(input.options),
 			input.variables ? JSON.stringify(input.variables) : null,
+			input.payload ? JSON.stringify(input.payload) : null,
 			input.createdAt,
 		)
 		.run();

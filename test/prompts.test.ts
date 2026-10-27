@@ -247,3 +247,145 @@ describe("trackable prompts", () => {
 		expect(tooMany.status).toBe(400);
 	});
 });
+
+describe("POST /api/conversations/:id/send (raw LINE messages)", () => {
+	it("instruments postback actions in a flex message and tracks the reply", async () => {
+		await seedUser("U-flex", "Flex老師");
+
+		let pushed: { messages: Array<Record<string, unknown>> } | null = null;
+		mockLine("POST", "/v2/bot/message/push", async (req) => {
+			pushed = (await req.json()) as typeof pushed;
+			return Response.json({});
+		});
+
+		const res = await SELF.fetch("https://console.test/api/conversations/line%3AU-flex/send", {
+			method: "POST",
+			headers: { ...AUTH, "Content-Type": "application/json" },
+			body: JSON.stringify({
+				templateKey: "flex-card",
+				messages: [
+					{
+						type: "flex",
+						altText: "排課媒合通知",
+						contents: {
+							type: "bubble",
+							body: { type: "box", layout: "vertical", contents: [{ type: "text", text: "王小明｜數學" }] },
+							footer: {
+								type: "box",
+								layout: "horizontal",
+								contents: [
+									{ type: "button", action: { type: "postback", label: "承接", data: "accept" } },
+									{ type: "button", action: { type: "postback", label: "不承接", data: "decline" } },
+									{ type: "button", action: { type: "uri", label: "詳情", uri: "https://example.com" } },
+								],
+							},
+						},
+					},
+				],
+			}),
+		});
+		expect(res.status).toBe(200);
+		const { prompt, message } = (await res.json()) as { prompt: Prompt; message: Message };
+		expect(prompt).not.toBeNull();
+		expect(prompt.options).toEqual([
+			{ label: "承接", value: "accept" },
+			{ label: "不承接", value: "decline" },
+		]);
+		expect(prompt.templateKey).toBe("flex-card");
+		expect(prompt.question).toBe("排課媒合通知");
+		expect(message.type).toBe("prompt");
+		expect(Array.isArray(prompt.payload)).toBe(true);
+
+		// postback data 已被改寫成 prompt=<id>&choice=<value>
+		const footer = (pushed!.messages[0].contents as { footer: { contents: Array<{ action: Record<string, string> }> } }).footer;
+		expect(parsePromptPostback(footer.contents[0].action.data)).toEqual({ promptId: prompt.id, choice: "accept" });
+		expect(parsePromptPostback(footer.contents[1].action.data)).toEqual({ promptId: prompt.id, choice: "decline" });
+		expect(footer.contents[2].action.uri).toBe("https://example.com");
+
+		mockLine("POST", "/v2/bot/message/reply", ok());
+		await postWebhook([
+			{
+				type: "postback",
+				timestamp: Date.now(),
+				source: { type: "user", userId: "U-flex" },
+				replyToken: "rt-flex",
+				webhookEventId: "evt-flex-1",
+				postback: { data: footer.contents[1].action.data },
+			},
+		]);
+		const list = await SELF.fetch("https://console.test/api/prompts?conversationId=line%3AU-flex", { headers: AUTH });
+		const { prompts } = (await list.json()) as { prompts: Prompt[] };
+		expect(prompts.find((p) => p.id === prompt.id)).toMatchObject({ status: "answered", choice: "decline", choiceLabel: "不承接" });
+	});
+
+	it("tracks quick reply postbacks and merges duplicated values across carousel cards", async () => {
+		await seedUser("U-qr", "QR老師");
+		let pushed: { messages: Array<Record<string, unknown>> } | null = null;
+		mockLine("POST", "/v2/bot/message/push", async (req) => {
+			pushed = (await req.json()) as typeof pushed;
+			return Response.json({});
+		});
+		const res = await SELF.fetch("https://console.test/api/conversations/line%3AU-qr/send", {
+			method: "POST",
+			headers: { ...AUTH, "Content-Type": "application/json" },
+			body: JSON.stringify({
+				messages: [
+					{
+						type: "text",
+						text: "方便嗎？",
+						quickReply: {
+							items: [
+								{ type: "action", action: { type: "postback", label: "承接", data: "accept" } },
+								{ type: "action", action: { type: "postback", label: "承接", data: "accept" } },
+								{ type: "action", action: { type: "message", label: "問題", text: "我有問題" } },
+							],
+						},
+					},
+				],
+			}),
+		});
+		expect(res.status).toBe(200);
+		const { prompt } = (await res.json()) as { prompt: Prompt };
+		expect(prompt.options).toEqual([{ label: "承接", value: "accept" }]);
+		const items = (pushed!.messages[0].quickReply as { items: Array<{ action: Record<string, string> }> }).items;
+		expect(items[0].action.data).toContain(`prompt=${prompt.id}`);
+		expect(items[2].action.text).toBe("我有問題");
+	});
+
+	it("stores untracked rich messages without creating a prompt", async () => {
+		await seedUser("U-rich", "Rich老師");
+		mockLine("POST", "/v2/bot/message/push", ok());
+		const res = await SELF.fetch("https://console.test/api/conversations/line%3AU-rich/send", {
+			method: "POST",
+			headers: { ...AUTH, "Content-Type": "application/json" },
+			body: JSON.stringify({
+				messages: [
+					{ type: "flex", altText: "純資訊卡", contents: { type: "bubble", body: { type: "box", layout: "vertical", contents: [{ type: "text", text: "hi" }] } } },
+				],
+			}),
+		});
+		expect(res.status).toBe(200);
+		const { prompt, message } = (await res.json()) as { prompt: Prompt | null; message: Message };
+		expect(prompt).toBeNull();
+		expect(message.type).toBe("rich");
+		expect(message.text).toBe("純資訊卡");
+	});
+
+	it("rejects malformed message arrays", async () => {
+		await seedUser("U-bad", "Bad");
+		const cases: unknown[] = [
+			{ messages: [] },
+			{ messages: [{ type: "flex" }] },
+			{ messages: [{ type: "weird" }] },
+			{ messages: new Array(6).fill({ type: "text", text: "x" }) },
+		];
+		for (const body of cases) {
+			const res = await SELF.fetch("https://console.test/api/conversations/line%3AU-bad/send", {
+				method: "POST",
+				headers: { ...AUTH, "Content-Type": "application/json" },
+				body: JSON.stringify(body),
+			});
+			expect(res.status, JSON.stringify(body)).toBe(400);
+		}
+	});
+});

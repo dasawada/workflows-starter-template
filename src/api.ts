@@ -7,6 +7,7 @@ import type {
 	Prompt,
 	PromptListResponse,
 	PromptStatus,
+	SendMessagesInput,
 	SendPromptInput,
 } from "../shared/types";
 
@@ -80,6 +81,12 @@ export const api = {
 	sendPrompt: (conversationId: string, input: SendPromptInput) =>
 		request<{ prompt: Prompt; message: Message; conversation: Conversation }>(
 			`/api/conversations/${encodeURIComponent(conversationId)}/prompt`,
+			{ method: "POST", body: JSON.stringify(input) },
+		),
+
+	sendMessages: (conversationId: string, input: SendMessagesInput) =>
+		request<{ prompt: Prompt | null; message: Message; conversation: Conversation }>(
+			`/api/conversations/${encodeURIComponent(conversationId)}/send`,
 			{ method: "POST", body: JSON.stringify(input) },
 		),
 

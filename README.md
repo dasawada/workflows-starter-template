@@ -6,7 +6,7 @@
 - **發訊**：客服在網頁上回覆 → LINE Push API → 存入 D1 → 廣播給其他在線客服
 - **媒體**：使用者傳的圖片／影片／語音／檔案背景下載到 R2，客服台直接顯示
 - **逾時提醒**：Cloudflare Workflows 監看每個對話，客服超過 `REPLY_SLA_MINUTES` 未回覆就標記「逾時」並推播
-- **可追蹤訊息**：客服台送出「正文 + 是／否按鈕」（LINE Confirm template），使用者點選後以 postback 回到 webhook，結果寫入 D1 的 `prompts` 與 `prompt_responses`，客服台即時顯示並可匯出 CSV。範本放在 `src/templates.ts`，正文裡的 `{{變數}}` 會自動變成表單欄位
+- **互動訊息**：客服台可直接編輯 LINE 訊息 JSON（Flex、Buttons、Confirm、Carousel、Quick reply、datetimepicker…）並即時預覽後送出；範例在 `src/presets.ts`。所有 postback 按鈕送出時會自動加上追蹤 id，使用者點選後以 postback 回到 webhook，結果寫入 D1 的 `prompts` 與 `prompt_responses`，客服台即時顯示並可匯出 CSV
 - **自動歡迎**：使用者加好友時用 reply token 送 `WELCOME_MESSAGE`
 - **群組／多人聊天室**：以群組為對話單位，訊息會標示發言者
 
@@ -94,7 +94,8 @@ npm run dev                      # http://localhost:5173，只看 UI 排版
 | GET | `/api/conversations?status=open\|closed\|all` | 對話清單 |
 | GET | `/api/conversations/:id/messages?before=&limit=` | 訊息（舊→新） |
 | POST | `/api/conversations/:id/reply` | `{ "text": "..." }` |
-| POST | `/api/conversations/:id/prompt` | `{ "body"?, "question", "options": [{label,value}], "templateKey"?, "variables"? }` 送可追蹤的選擇題 |
+| POST | `/api/conversations/:id/send` | `{ "messages": [LINE 訊息…], "templateKey"? }` 直接送訊息陣列（最多 5 則），postback 自動追蹤 |
+| POST | `/api/conversations/:id/prompt` | `{ "body"?, "question", "options": [{label,value}] }` 舊介面：正文 + Confirm 是／否 |
 | GET | `/api/prompts?status=all\|pending\|answered&conversationId=` | 可追蹤訊息與使用者的選擇 |
 | POST | `/api/conversations/:id/read` | 清除未讀 |
 | POST | `/api/conversations/:id/status` | `{ "status": "open" \| "closed" }` |
@@ -114,5 +115,5 @@ npm run deploy
 
 - 客服台目前是單一共用密鑰，沒有個別帳號與權限；多人使用建議改接 Cloudflare Access 或自建帳號。
 - 一般回覆只能純文字；LINE 的圖片／貼圖／Flex Message 發送可在 `worker/line.ts` 的 `push()` 擴充。
-- 可追蹤訊息的按鈕最多兩顆（LINE Confirm template 的限制），問句最多 240 字。
+- 互動訊息的 JSON 由 LINE API 做最終驗證，格式錯誤會以 502 把 LINE 的錯誤訊息回到客服台；客服台的預覽是近似呈現，精確版面請用 LINE Flex Message Simulator。
 - Teams 尚未實作（schema 與渠道層已預留）。

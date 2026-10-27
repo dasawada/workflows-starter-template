@@ -4,7 +4,14 @@ export { InboxDO } from "./inbox-do";
 import { isAuthorized, unauthorized } from "./auth";
 import { handleLineWebhook } from "./webhook-line";
 import { inboxStub } from "./inbox-do";
-import { LineClient, TEXT_MESSAGE_MAX, buildPromptMessages } from "./line";
+import {
+	LineClient,
+	TEXT_MESSAGE_MAX,
+	buildPromptMessages,
+	instrumentPostbacks,
+	summarizeMessages,
+	validateLineMessages,
+} from "./line";
 import { AGENT_REPLIED_EVENT } from "./workflow";
 import {
 	createPrompt,
@@ -22,6 +29,7 @@ import type {
 	ConversationStatus,
 	PromptOption,
 	PromptStatus,
+	SendMessagesInput,
 	SendPromptInput,
 } from "../shared/types";
 
@@ -34,6 +42,7 @@ import type {
  * - GET  /api/conversations/:id/messages    訊息（?before=<ts>&limit=）
  * - POST /api/conversations/:id/reply       客服回覆 { text }
  * - POST /api/conversations/:id/prompt      送可追蹤的選擇題 { body?, question, options[] }
+ * - POST /api/conversations/:id/send        直接送 LINE 訊息陣列 { messages[] }，postback 自動追蹤
  * - GET  /api/prompts?status=&conversationId= 可追蹤訊息與回覆結果
  * - POST /api/conversations/:id/read        清除未讀
  * - POST /api/conversations/:id/status      { status: "open" | "closed" }
@@ -80,7 +89,7 @@ export default {
 		}
 
 		const convMatch = pathname.match(
-			/^\/api\/conversations\/([^/]+)\/(messages|reply|read|status|prompt)$/,
+			/^\/api\/conversations\/([^/]+)\/(messages|reply|read|status|prompt|send)$/,
 		);
 		if (convMatch) {
 			const conversationId = decodeURIComponent(convMatch[1]);
@@ -138,6 +147,10 @@ export default {
 
 			if (action === "prompt" && request.method === "POST") {
 				return handleSendPrompt(request, env, conversation.id, conversation.externalId, conversation.channel);
+			}
+
+			if (action === "send" && request.method === "POST") {
+				return handleSendMessages(request, env, conversation.id, conversation.externalId, conversation.channel);
 			}
 		}
 
@@ -241,8 +254,7 @@ function normalizeOptions(raw: unknown): PromptOption[] | null {
 }
 
 /**
- * 送出可追蹤的選擇題：正文（選填）+ Confirm 按鈕。
- * 先推 LINE，成功才寫 prompts 與 messages，避免留下沒送出的紀錄。
+ * 送出可追蹤的選擇題：正文（選填）+ Confirm 按鈕。舊介面，內部轉成訊息陣列走 sendTracked。
  */
 async function handleSendPrompt(
 	request: Request,
@@ -260,8 +272,6 @@ async function handleSendPrompt(
 	if (question.length > 240) return Response.json({ error: "question too long (max 240)" }, { status: 400 });
 	if (body && body.length > TEXT_MESSAGE_MAX) return Response.json({ error: "body too long (max 5000)" }, { status: 400 });
 	if (!options) return Response.json({ error: "options must be 1-2 items with label/value" }, { status: 400 });
-	if (channel !== "line") return Response.json({ error: `channel ${channel} not supported yet` }, { status: 400 });
-	if (!env.LINE_CHANNEL_ACCESS_TOKEN) return Response.json({ error: "LINE_CHANNEL_ACCESS_TOKEN not configured" }, { status: 500 });
 
 	const variables =
 		input.variables && typeof input.variables === "object"
@@ -270,16 +280,69 @@ async function handleSendPrompt(
 				)
 			: null;
 
+	// buildPromptMessages 會先放一個暫時 id，sendTracked 會再統一改寫成正式的 prompt id
+	const messages = buildPromptMessages({ promptId: "pending", body, question, options }) as Record<string, unknown>[];
+	return sendTracked(env, {
+		conversationId,
+		recipientId,
+		channel,
+		messages,
+		templateKey: typeof input.templateKey === "string" ? input.templateKey : null,
+		variables,
+	});
+}
+
+/**
+ * 直接送 LINE 訊息陣列（Flex、template、quick reply…）。
+ * 任何 postback 按鈕都會自動掛上追蹤 id，使用者點選後寫回 prompts。
+ */
+async function handleSendMessages(
+	request: Request,
+	env: Env,
+	conversationId: string,
+	recipientId: string,
+	channel: string,
+): Promise<Response> {
+	const input = (await request.json().catch(() => ({}))) as Partial<SendMessagesInput>;
+	const validated = validateLineMessages(input.messages);
+	if (!validated.ok) return Response.json({ error: validated.error }, { status: 400 });
+	return sendTracked(env, {
+		conversationId,
+		recipientId,
+		channel,
+		messages: validated.messages,
+		templateKey: typeof input.templateKey === "string" ? input.templateKey : null,
+		variables: null,
+	});
+}
+
+/**
+ * 共用：先推 LINE，成功才寫 messages 與 prompts（若含 postback），再廣播。
+ */
+async function sendTracked(
+	env: Env,
+	input: {
+		conversationId: string;
+		recipientId: string;
+		channel: string;
+		messages: Record<string, unknown>[];
+		templateKey: string | null;
+		variables: Record<string, string> | null;
+	},
+): Promise<Response> {
+	if (input.channel !== "line") return Response.json({ error: `channel ${input.channel} not supported yet` }, { status: 400 });
+	if (!env.LINE_CHANNEL_ACCESS_TOKEN) return Response.json({ error: "LINE_CHANNEL_ACCESS_TOKEN not configured" }, { status: 500 });
+
 	const promptId = crypto.randomUUID();
+	const { messages, options } = instrumentPostbacks(input.messages, promptId);
+	const tracked = options.length > 0;
+	const { body, question } = summarizeMessages(messages);
 	const now = Date.now();
 
 	try {
-		await new LineClient(env.LINE_CHANNEL_ACCESS_TOKEN).push(
-			recipientId,
-			buildPromptMessages({ promptId, body, question, options }),
-		);
+		await new LineClient(env.LINE_CHANNEL_ACCESS_TOKEN).push(input.recipientId, messages);
 	} catch (err) {
-		console.error("prompt push failed", err);
+		console.error("push failed", err);
 		return Response.json(
 			{ error: err instanceof Error ? err.message : "LINE push failed" },
 			{ status: 502 },
@@ -289,27 +352,17 @@ async function handleSendPrompt(
 	const messageId = crypto.randomUUID();
 	const inserted = await insertMessage(env.DB, {
 		id: messageId,
-		conversationId,
+		conversationId: input.conversationId,
 		direction: "outbound",
 		sender: "agent",
-		type: "prompt",
-		text: body ? `${body}\n\n${question}` : question,
-		metadata: { promptId, question, options, status: "pending" },
+		type: tracked ? "prompt" : "rich",
+		text: body ? (body === question ? body : `${body}\n\n${question}`) : question,
+		metadata: tracked
+			? { promptId, question, options, status: "pending", payload: messages }
+			: { question, payload: messages },
 		createdAt: now,
 	});
 	if (!inserted) return Response.json({ error: "failed to persist message" }, { status: 500 });
-
-	const prompt = await createPrompt(env.DB, {
-		id: promptId,
-		conversationId,
-		messageId,
-		templateKey: typeof input.templateKey === "string" ? input.templateKey : null,
-		body,
-		question,
-		options,
-		variables,
-		createdAt: now,
-	});
 
 	const inbox = inboxStub(env);
 	await inbox.broadcast({
@@ -317,8 +370,24 @@ async function handleSendPrompt(
 		message: inserted.message,
 		conversation: inserted.conversation,
 	});
-	await inbox.broadcast({ type: "prompt.updated", prompt });
-	await finishReminder(env, conversationId);
+
+	let prompt = null;
+	if (tracked) {
+		prompt = await createPrompt(env.DB, {
+			id: promptId,
+			conversationId: input.conversationId,
+			messageId,
+			templateKey: input.templateKey,
+			body,
+			question,
+			options,
+			variables: input.variables,
+			payload: messages,
+			createdAt: now,
+		});
+		await inbox.broadcast({ type: "prompt.updated", prompt });
+	}
+	await finishReminder(env, input.conversationId);
 
 	return Response.json({ prompt, message: inserted.message, conversation: inserted.conversation });
 }

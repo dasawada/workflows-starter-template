@@ -6,14 +6,14 @@ import type {
 	Message,
 	Prompt,
 	PromptStatus,
-	SendPromptInput,
+	SendMessagesInput,
 } from "../shared/types";
 import { api, ApiError, getToken, setToken } from "./api";
 import { useInboxSocket } from "./hooks/useInboxSocket";
 import { Login } from "./components/Login";
 import { ConversationList } from "./components/ConversationList";
 import { MessageThread } from "./components/MessageThread";
-import { PromptDialog } from "./components/PromptDialog";
+import { ComposeDialog } from "./components/ComposeDialog";
 import { PromptsPanel } from "./components/PromptsPanel";
 
 const PAGE_SIZE = 50;
@@ -211,9 +211,9 @@ function App() {
 		upsertConversation(conversation);
 	};
 
-	const handleSendPrompt = async (input: SendPromptInput) => {
+	const handleSendMessages = async (input: SendMessagesInput) => {
 		if (!selectedId) return;
-		const { message, conversation } = await api.sendPrompt(selectedId, input);
+		const { message, conversation } = await api.sendMessages(selectedId, input);
 		setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
 		upsertConversation(conversation);
 	};
@@ -343,7 +343,7 @@ function App() {
 			</div>
 
 			{promptDialogOpen && selected && (
-				<PromptDialog onClose={() => setPromptDialogOpen(false)} onSend={handleSendPrompt} />
+				<ComposeDialog onClose={() => setPromptDialogOpen(false)} onSend={handleSendMessages} />
 			)}
 		</div>
 	);

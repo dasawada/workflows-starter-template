@@ -41,10 +41,10 @@ export function Composer({ disabled, onSend, onOpenPrompt }: Props) {
 					type="button"
 					onClick={onOpenPrompt}
 					disabled={disabled}
-					title="發送帶「是／否」按鈕的可追蹤訊息"
+					title="發送 Flex / 按鈕 / Quick reply 等互動訊息，按鈕回覆會自動追蹤"
 					className="shrink-0 rounded-lg border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-50 text-sm px-3 py-2"
 				>
-					選擇題
+					互動訊息
 				</button>
 				<textarea
 					value={text}

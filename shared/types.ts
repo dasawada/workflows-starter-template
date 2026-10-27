@@ -15,6 +15,7 @@ export type MessageType =
 	| "sticker"
 	| "location"
 	| "prompt"
+	| "rich"
 	| "unknown";
 
 export interface Conversation {
@@ -71,8 +72,17 @@ export interface Prompt {
 	choiceLabel: string | null;
 	respondedAt: number | null;
 	createdAt: number;
+	/** 實際送出的 LINE 訊息陣列 */
+	payload: unknown[] | null;
 	/** 列表用：對話的顯示名稱 */
 	displayName?: string | null;
+}
+
+/** 直接送 LINE 訊息陣列（Flex / template / quick reply…）；postback 按鈕會自動加上追蹤 id */
+export interface SendMessagesInput {
+	messages: unknown[];
+	templateKey?: string;
+	note?: string;
 }
 
 export interface SendPromptInput {

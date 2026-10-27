@@ -317,6 +317,7 @@ async function handlePostback(
 			choice: prompt.choice,
 			choiceLabel: prompt.choiceLabel,
 			respondedAt: prompt.respondedAt,
+			payload: prompt.payload,
 		});
 		if (updated) {
 			await inbox.broadcast({
