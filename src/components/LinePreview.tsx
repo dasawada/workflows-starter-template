@@ -224,6 +224,9 @@ function FlexNode({ node }: { node: Json }) {
 				borderRadius: px(node.cornerRadius, SPACE),
 				flex: typeof node.flex === "number" ? node.flex : undefined,
 				justifyContent: node.justifyContent === "center" ? "center" : node.justifyContent === "flex-end" ? "flex-end" : undefined,
+				height: str(node.height) || undefined,
+				width: str(node.width) || undefined,
+				overflow: node.cornerRadius ? "hidden" : undefined,
 			};
 			const children = Array.isArray(node.contents) ? node.contents : [];
 			return (

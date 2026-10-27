@@ -187,6 +187,153 @@ export const MESSAGE_PRESETS: MessagePreset[] = [
 		],
 	},
 	{
+		key: "flex-ticket",
+		name: "Flex 課程票券（承接 / 有條件承接 / 拒接）",
+		hint: "票券風格：色帶標頭、虛線分隔、底部三顆按鈕。「有條件承接」會開啟鍵盤並預填文字（inputOption/fillInText，LINE 12.6.0+），老師改幾個字就能送出。",
+		messages: [
+			{
+				type: "flex",
+				altText: "課程邀約：王小明 國中數學 11/3 起，請回覆承接／拒接",
+				contents: {
+					type: "bubble",
+					size: "mega",
+					header: {
+						type: "box",
+						layout: "horizontal",
+						backgroundColor: "#1F2937",
+						paddingAll: "14px",
+						contents: [
+							{ type: "text", text: "COURSE TICKET", color: "#9CA3AF", size: "xxs", weight: "bold", flex: 0 },
+							{ type: "text", text: "#OFFER-123", color: "#FFFFFF", size: "xxs", align: "end" },
+						],
+					},
+					body: {
+						type: "box",
+						layout: "vertical",
+						spacing: "md",
+						contents: [
+							{ type: "text", text: "國中數學", weight: "bold", size: "xl" },
+							{ type: "text", text: "學生：王小明（國二）", size: "sm", color: "#6B7280" },
+							{
+								type: "box",
+								layout: "horizontal",
+								margin: "md",
+								contents: [
+									{
+										type: "box",
+										layout: "vertical",
+										flex: 1,
+										contents: [
+											{ type: "text", text: "首課日", size: "xxs", color: "#9CA3AF" },
+											{ type: "text", text: "11/3（一）", size: "md", weight: "bold" },
+										],
+									},
+									{
+										type: "box",
+										layout: "vertical",
+										flex: 1,
+										contents: [
+											{ type: "text", text: "時段", size: "xxs", color: "#9CA3AF" },
+											{ type: "text", text: "一、三 19:00", size: "md", weight: "bold" },
+										],
+									},
+									{
+										type: "box",
+										layout: "vertical",
+										flex: 1,
+										contents: [
+											{ type: "text", text: "堂數", size: "xxs", color: "#9CA3AF" },
+											{ type: "text", text: "16 堂", size: "md", weight: "bold" },
+										],
+									},
+								],
+							},
+							{ type: "separator", margin: "lg", color: "#D1D5DB" },
+							{ type: "text", text: "學生狀況：基礎尚可，需加強幾何證明。家長希望每堂課後簡短回報。", size: "xs", color: "#4B5563", wrap: true, margin: "lg" },
+						],
+					},
+					footer: {
+						type: "box",
+						layout: "vertical",
+						spacing: "sm",
+						contents: [
+							{
+								type: "button",
+								style: "primary",
+								color: "#06C755",
+								action: { type: "postback", label: "承接", data: "accept", displayText: "承接 #OFFER-123" },
+							},
+							{
+								type: "button",
+								style: "secondary",
+								action: {
+									type: "postback",
+									label: "有條件承接（我來補充）",
+									data: "conditional",
+									displayText: "有條件承接",
+									inputOption: "openKeyboard",
+									fillInText: "#OFFER-123 有條件承接\n可授課時段：\n備註：",
+								},
+							},
+							{
+								type: "button",
+								style: "link",
+								action: { type: "postback", label: "拒接", data: "decline", displayText: "拒接 #OFFER-123" },
+							},
+						],
+					},
+				},
+			},
+		],
+	},
+	{
+		key: "flex-progress",
+		name: "Flex 媒合進度條（純資訊，不追蹤）",
+		hint: "用無間距的水平色塊做進度條。沒有 postback 按鈕時不會建立追蹤紀錄，適合純通知。",
+		messages: [
+			{
+				type: "flex",
+				altText: "媒合進度：老師已確認，等待家長確認（2/4）",
+				contents: {
+					type: "bubble",
+					body: {
+						type: "box",
+						layout: "vertical",
+						spacing: "md",
+						contents: [
+							{ type: "text", text: "媒合進度", weight: "bold", size: "lg" },
+							{ type: "text", text: "王小明｜國中數學", size: "sm", color: "#6B7280" },
+							{
+								type: "box",
+								layout: "horizontal",
+								spacing: "none",
+								margin: "md",
+								cornerRadius: "md",
+								contents: [
+									{ type: "box", layout: "vertical", flex: 1, backgroundColor: "#06C755", height: "8px", contents: [] },
+									{ type: "box", layout: "vertical", flex: 1, backgroundColor: "#06C755", height: "8px", contents: [] },
+									{ type: "box", layout: "vertical", flex: 1, backgroundColor: "#FBBF24", height: "8px", contents: [] },
+									{ type: "box", layout: "vertical", flex: 1, backgroundColor: "#E5E7EB", height: "8px", contents: [] },
+								],
+							},
+							{
+								type: "box",
+								layout: "horizontal",
+								contents: [
+									{ type: "text", text: "通知", size: "xxs", color: "#06C755", align: "center", flex: 1 },
+									{ type: "text", text: "老師確認", size: "xxs", color: "#06C755", align: "center", flex: 1 },
+									{ type: "text", text: "家長確認", size: "xxs", color: "#D97706", align: "center", flex: 1, weight: "bold" },
+									{ type: "text", text: "排定", size: "xxs", color: "#9CA3AF", align: "center", flex: 1 },
+								],
+							},
+							{ type: "text", text: "目前等待家長確認時段，確認後會再通知老師。", size: "xs", color: "#4B5563", wrap: true, margin: "md" },
+						],
+					},
+				},
+			},
+		],
+	},
+	{
 		key: "text-quickreply",
 		name: "文字 + Quick reply（小圓鈕）",
 		hint: "小圓鈕掛在最後一則訊息下方，最多 13 顆，點過或再傳訊息就消失。可混用 postback、日期選擇、開網址。",
