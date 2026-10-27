@@ -12,6 +12,7 @@ import type {
 } from "../shared/types";
 import { api, ApiError, getToken, setToken } from "./api";
 import { getAgentName, setAgentName } from "./agent";
+import { parseRoute, routePath, sameRoute, type ComposeMode, type Panel, type Route } from "./route";
 import { useInboxSocket } from "./hooks/useInboxSocket";
 import { Login } from "./components/Login";
 import { ConversationList } from "./components/ConversationList";
@@ -29,7 +30,6 @@ const LIST_PAGE = 50;
 const LIST_CAP = 1000;
 
 type AuthState = "checking" | "anonymous" | "authed";
-type Panel = null | "prompts" | "integrity" | "imports" | "notifications";
 
 function App() {
 	const [auth, setAuth] = useState<AuthState>(getToken() && getAgentName() ? "checking" : "anonymous");
@@ -49,16 +49,38 @@ function App() {
 	listHasMoreRef.current = listHasMore;
 	const loadingRef = useRef(false);
 
-	const [selectedId, setSelectedId] = useState<string | null>(null);
+	// ---------- 路由：選取的對話、面板、對話框都存在網址裡，瀏覽器上一頁才有作用 ----------
+	const [route, setRoute] = useState<Route>(() => parseRoute(window.location));
+	const routeRef = useRef(route);
+	routeRef.current = route;
+	useEffect(() => {
+		const onPop = () => setRoute(parseRoute(window.location));
+		window.addEventListener("popstate", onPop);
+		return () => window.removeEventListener("popstate", onPop);
+	}, []);
+	const navigate = useCallback((update: Partial<Route> | ((prev: Route) => Route), replace = false) => {
+		const prev = routeRef.current;
+		const next = typeof update === "function" ? update(prev) : { ...prev, ...update };
+		if (sameRoute(prev, next)) return;
+		const path = routePath(next);
+		if (path !== window.location.pathname + window.location.search + window.location.hash) {
+			window.history[replace ? "replaceState" : "pushState"](null, "", path);
+		}
+		routeRef.current = next;
+		setRoute(next);
+	}, []);
+	const selectedId = route.conversationId;
+	const panel = route.panel;
+	const composeMode = route.compose;
+	const setPanel = useCallback((p: Panel) => navigate({ panel: p, compose: "closed" }), [navigate]);
+	const setComposeMode = useCallback((m: ComposeMode) => navigate({ compose: m }), [navigate]);
 	/** 選中的對話獨立保存，即使它被捲出清單或不符合目前篩選也不會消失 */
 	const [selected, setSelected] = useState<Conversation | null>(null);
 	const [messages, setMessages] = useState<Message[]>([]);
 	const [messagesLoading, setMessagesLoading] = useState(false);
 	const [hasMore, setHasMore] = useState(false);
 
-	const [composeMode, setComposeMode] = useState<"closed" | "builder" | "json">("closed");
 	const [jsonSeed, setJsonSeed] = useState<unknown[] | undefined>(undefined);
-	const [panel, setPanel] = useState<Panel>(null);
 	const promptsPanelOpen = panel === "prompts";
 	const setPromptsPanelOpen = (open: boolean) => setPanel(open ? "prompts" : null);
 	/** 完整性事件／通知更新時遞增，讓面板重抓 */
@@ -96,21 +118,21 @@ function App() {
 		} catch (err) {
 			setToken(null);
 			setLoginError(
-				err instanceof ApiError && err.status === 401 ? "密鑰不正確" : "無法連線到伺服器",
+				err instanceof ApiError && err.status === 401 ? "密鑰不正確" : "無法連線至伺服器",
 			);
 		} finally {
 			setLoginBusy(false);
 		}
 	};
 
-	const handleLogout = () => {
+	const handleLogout = useCallback(() => {
 		setToken(null);
 		setAuth("anonymous");
 		setConversations([]);
-		setSelectedId(null);
+		navigate({ conversationId: null, panel: null, compose: "closed" }, true);
 		setSelected(null);
 		setMessages([]);
-	};
+	}, [navigate]);
 
 	// ---------- 對話清單（游標分頁） ----------
 	const loadConversations = useCallback(
@@ -142,12 +164,31 @@ function App() {
 				setListLoading(false);
 			}
 		},
-		[filter, query],
+		[filter, query, handleLogout],
 	);
 
 	useEffect(() => {
 		if (auth === "authed") void loadConversations(true);
 	}, [auth, loadConversations]);
+
+	// 直接以網址開啟（重新整理、書籤、上一頁）時，選取的對話可能不在清單裡，補抓一次
+	useEffect(() => {
+		if (auth !== "authed" || !selectedId) return;
+		if (selected?.id === selectedId) return;
+		const known = conversationsRef.current.find((c) => c.id === selectedId);
+		if (known) {
+			setSelected(known);
+			return;
+		}
+		const externalId = selectedId.split(":").pop() ?? selectedId;
+		api
+			.listConversations({ status: "all", q: externalId, limit: 5 })
+			.then(({ conversations }) => {
+				const found = conversations.find((c) => c.id === selectedId);
+				if (found) setSelected((prev) => (prev?.id === selectedId ? prev : found));
+			})
+			.catch(() => {});
+	}, [auth, selectedId, selected?.id, conversations]);
 
 	const refreshStats = useCallback(() => {
 		api.stats().then(setStats).catch(() => {});
@@ -324,22 +365,11 @@ function App() {
 	}, [connected, auth, loadConversations, refreshStats]);
 
 	// ---------- 操作 ----------
+	/** 選取對話只改網址；selected 由上方的 effect 依 selectedId 補齊（含不在清單裡的對話） */
 	const selectConversation = useCallback((id: string | null) => {
-		setSelectedId(id);
-		const known = id ? (conversationsRef.current.find((c) => c.id === id) ?? null) : null;
-		setSelected(known);
-		// 從完整性中心／追蹤訊息跳過來的對話可能不在目前載入的清單裡，用 external id 搜一次
-		if (id && !known) {
-			const externalId = id.split(":").pop() ?? id;
-			api
-				.listConversations({ status: "all", q: externalId, limit: 5 })
-				.then(({ conversations }) => {
-					const found = conversations.find((c) => c.id === id);
-					if (found) setSelected((prev) => prev ?? found);
-				})
-				.catch(() => {});
-		}
-	}, []);
+		navigate({ conversationId: id, panel: null, compose: "closed" });
+		setSelected(id ? (conversationsRef.current.find((c) => c.id === id) ?? null) : null);
+	}, [navigate]);
 
 	const mergeMessage = useCallback((message: Message) => {
 		setMessages((prev) => {
@@ -392,7 +422,7 @@ function App() {
 			if (err instanceof ApiError && err.status === 409) {
 				// 互動訊息對話框沒有衝突確認 UI：直接用 force 再送一次前先問
 				const data = err.data as { error?: string } | null;
-				if (window.confirm(`${data?.error ?? "有衝突"}\n仍要送出嗎？`)) {
+				if (window.confirm(`${data?.error ?? "發生衝突"}\n仍要發送嗎？`)) {
 					const { message, conversation } = await api.sendMessages(selectedId, { ...input, force: true, clientKey: crypto.randomUUID() });
 					mergeMessage(message);
 					upsertConversation(conversation);
@@ -431,7 +461,7 @@ function App() {
 	};
 
 	const changeAgentName = () => {
-		const next = window.prompt("你的名字（同事會看到）", agentName ?? "");
+		const next = window.prompt("請輸入客服名稱（供同事識別）", agentName ?? "");
 		if (next === null) return;
 		const name = next.trim().slice(0, 40);
 		if (!name) return;
@@ -491,9 +521,9 @@ function App() {
 				{(
 					[
 						["prompts", "追蹤訊息", 0],
-						["integrity", "完整性", openGaps],
-						["imports", "匯入", 0],
-						["notifications", "通知", 0],
+						["integrity", "完整性中心", openGaps],
+						["imports", "歷史匯入", 0],
+						["notifications", "通知型訊息", 0],
 					] as [Panel, string, number][]
 				).map(([key, label, badge]) => (
 					<button
@@ -507,7 +537,7 @@ function App() {
 					>
 						{label}
 						{badge > 0 && (
-							<span className="text-[10px] px-1 rounded-full bg-amber-500 text-white font-semibold" title="未處理的資料缺口">
+							<span className="text-[10px] px-1 rounded-full bg-amber-500 text-white font-semibold" title="未處理的完整性事件">
 								{badge > 99 ? "99+" : badge}
 							</span>
 						)}
@@ -515,10 +545,10 @@ function App() {
 				))}
 				<button
 					onClick={changeAgentName}
-					title="更改你的名字"
+					title="變更客服名稱"
 					className="ml-auto text-[11px] text-neutral-600 dark:text-neutral-300 hover:underline"
 				>
-					{agentName ?? "未設定名字"}
+					{agentName ?? "未設定名稱"}
 				</button>
 				<span
 					className={`flex items-center gap-1.5 text-[11px] ${
@@ -614,7 +644,7 @@ function App() {
 						/>
 					) : (
 						<div className="h-full flex items-center justify-center text-sm text-neutral-400">
-							從左側選擇一個對話
+							請從左側清單選擇對話
 						</div>
 					)}
 				</main>

@@ -163,8 +163,8 @@ function buildMessage(kind: MessageKind): MessageDraft {
 
 export const KIND_LABELS: Record<MessageKind, { name: string; description: string }> = {
 	text: { name: "文字", description: "純文字，最長 5000 字" },
-	confirm: { name: "是／否確認", description: "一句問話 + 兩顆按鈕" },
-	buttons: { name: "按鈕卡", description: "標題、短文、最多 4 顆按鈕，可放圖" },
-	carousel: { name: "輪播卡", description: "多張卡片左右滑，每張最多 3 顆按鈕" },
-	card: { name: "資訊卡（Flex）", description: "色帶標題、欄位表、長文備註、最多 3 顆按鈕" },
+	confirm: { name: "是／否確認", description: "一句問句與兩個按鈕" },
+	buttons: { name: "按鈕卡", description: "標題、短文與最多 4 個按鈕，可加入圖片" },
+	carousel: { name: "輪播卡", description: "多張卡片橫向捲動，每張最多 3 個按鈕" },
+	card: { name: "資訊卡（Flex）", description: "色帶標題、欄位表、備註與最多 3 個按鈕" },
 };

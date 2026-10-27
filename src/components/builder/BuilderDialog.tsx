@@ -54,7 +54,7 @@ export function BuilderDialog({ onClose, onSend, onSwitchToJson }: Props) {
 	const pickPreset = (key: string) => {
 		const p = BUILDER_PRESETS.find((x) => x.key === key);
 		if (!p) return;
-		if (draft.messages.length && !confirm("套用範本會覆蓋目前的內容，確定？")) return;
+		if (draft.messages.length && !confirm("套用範本將覆蓋目前內容，是否繼續？")) return;
 		const next = p.build();
 		setPresetKey(key);
 		setDraft(next);
@@ -91,7 +91,7 @@ export function BuilderDialog({ onClose, onSend, onSwitchToJson }: Props) {
 			await onSend({ messages, templateKey: `builder:${presetKey}`, allowChange });
 			onClose();
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "送出失敗");
+			setError(err instanceof Error ? err.message : "發送失敗");
 		} finally {
 			setSending(false);
 		}
@@ -117,9 +117,9 @@ export function BuilderDialog({ onClose, onSend, onSwitchToJson }: Props) {
 					<button
 						onClick={() => onSwitchToJson(messages)}
 						className="text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 underline-offset-2 hover:underline"
-						title="把目前內容轉成 JSON，自行微調"
+						title="將目前內容轉為 JSON 以自行調整"
 					>
-						進階：改 JSON
+						進階：編輯 JSON
 					</button>
 					<button onClick={onClose} className="ml-auto text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 text-xl leading-none" aria-label="關閉">
 						×
@@ -130,7 +130,7 @@ export function BuilderDialog({ onClose, onSend, onSwitchToJson }: Props) {
 					{/* 左：訊息清單與表單 */}
 					<div className="lg:col-span-3 overflow-y-auto p-4 space-y-3 border-r border-neutral-200 dark:border-neutral-800">
 						{draft.messages.length === 0 && (
-							<p className="text-sm text-neutral-500 text-center py-6">還沒有訊息，從下方加入一則</p>
+							<p className="text-sm text-neutral-500 text-center py-6">尚未加入訊息，請由下方選擇類型加入</p>
 						)}
 						{draft.messages.map((m, i) => {
 							const open = openId === m.id;
@@ -146,7 +146,7 @@ export function BuilderDialog({ onClose, onSend, onSwitchToJson }: Props) {
 										<span className="text-[11px] text-neutral-400 truncate">{summary(m)}</span>
 										{errs.length > 0 && (
 											<span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300">
-												{errs.length} 項待修
+												{errs.length} 項待修正
 											</span>
 										)}
 										<span className="ml-auto flex gap-1" onClick={(e) => e.stopPropagation()}>
@@ -193,8 +193,8 @@ export function BuilderDialog({ onClose, onSend, onSwitchToJson }: Props) {
 						</div>
 
 						<div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3 space-y-2">
-							<div className="text-xs font-semibold text-neutral-800 dark:text-neutral-200">快速回覆小圓鈕（掛在最後一則下方，選填）</div>
-							<p className="text-[11px] text-neutral-500">點過或有新訊息就消失，適合立即追問；需要留痕的決定請用上方按鈕。</p>
+							<div className="text-xs font-semibold text-neutral-800 dark:text-neutral-200">快速回覆按鈕（顯示於最後一則訊息下方，選填）</div>
+							<p className="text-[11px] text-neutral-500">使用者點選後或收到新訊息時即消失，適合即時追問；需保留紀錄的決定請使用上方按鈕。</p>
 							{errorsFor(-1).length > 0 && (
 								<ul className="text-[11px] text-red-600 list-disc pl-4">
 									{errorsFor(-1).map((e, k) => (
@@ -206,7 +206,7 @@ export function BuilderDialog({ onClose, onSend, onSwitchToJson }: Props) {
 								actions={draft.quickReply}
 								min={0}
 								max={LIMITS.quickReplyItems}
-								title="小圓鈕"
+								title="快速回覆"
 								onChange={(quickReply) => setDraft((d) => ({ ...d, quickReply }))}
 							/>
 						</div>
@@ -217,7 +217,7 @@ export function BuilderDialog({ onClose, onSend, onSwitchToJson }: Props) {
 						<div className="px-4 py-2 text-[11px] font-medium text-neutral-500 border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 flex items-center">
 							預覽（近似）
 							<span className="ml-auto text-neutral-400">
-								{draft.messages.length} 則 · {trackable} 顆可追蹤按鈕
+								{draft.messages.length} 則 · {trackable} 個可追蹤按鈕
 							</span>
 						</div>
 						<div className="flex-1 overflow-auto p-4 bg-[#8CABD9] dark:bg-[#3b4a63]">
@@ -228,17 +228,17 @@ export function BuilderDialog({ onClose, onSend, onSwitchToJson }: Props) {
 
 				<div className="flex items-center gap-3 px-5 py-3 border-t border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
 					{trackable > 0 && (
-						<label className="flex items-center gap-1.5 text-xs text-neutral-600 dark:text-neutral-400" title="LINE 的按鈕可以反覆按；預設只採用第一次，之後再按只回覆提示不改結果">
+						<label className="flex items-center gap-1.5 text-xs text-neutral-600 dark:text-neutral-400" title="LINE 的按鈕可重複點選；預設僅採用第一次選擇，之後的點選只回覆提示而不變更結果">
 							<input type="checkbox" checked={allowChange} onChange={(e) => setAllowChange(e.target.checked)} className="accent-emerald-600" />
-							允許使用者更改回覆（取最後一次）
+							允許使用者變更回覆（以最後一次為準）
 						</label>
 					)}
 					{error && <span className="text-xs text-red-600">{error}</span>}
 					{!error && errors.length > 0 && (
-						<span className="text-xs text-amber-600">還有 {errors.length} 項要修正才能送出</span>
+						<span className="text-xs text-amber-600">尚有 {errors.length} 項需修正後才能發送</span>
 					)}
 					{!error && errors.length === 0 && draft.messages.length > 0 && (
-						<span className="text-xs text-emerald-600">格式合法，可以送出</span>
+						<span className="text-xs text-emerald-600">格式正確，可以發送</span>
 					)}
 					<button onClick={onClose} className="ml-auto text-sm px-4 py-2 rounded-lg text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800">
 						取消
@@ -248,7 +248,7 @@ export function BuilderDialog({ onClose, onSend, onSwitchToJson }: Props) {
 						disabled={sending || errors.length > 0 || draft.messages.length === 0}
 						className="text-sm font-medium px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white"
 					>
-						{sending ? "送出中…" : "送出"}
+						{sending ? "發送中…" : "發送"}
 					</button>
 				</div>
 			</div>
@@ -265,7 +265,7 @@ function summary(m: MessageDraft): string {
 		case "buttons":
 			return m.title || m.text;
 		case "carousel":
-			return `${m.columns.length} 張卡`;
+			return `${m.columns.length} 張卡片`;
 		case "card":
 			return m.headerTitle || m.title || m.note;
 	}

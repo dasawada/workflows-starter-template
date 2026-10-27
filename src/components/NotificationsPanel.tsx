@@ -9,10 +9,10 @@ interface Props {
 }
 
 const STATUS_LABEL: Record<NotificationStatus, { text: string; cls: string }> = {
-	pending: { text: "送出中", cls: "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300" },
+	pending: { text: "發送中", cls: "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300" },
 	sent: { text: "LINE 已接受", cls: "bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200" },
 	delivered: { text: "已送達", cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300" },
-	failed: { text: "失敗", cls: "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300" },
+	failed: { text: "發送失敗", cls: "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300" },
 };
 
 /**
@@ -69,7 +69,7 @@ export function NotificationsPanel({ refreshKey, onClose }: Props) {
 		<div className="flex flex-col h-full">
 			<header className="flex items-center gap-2 px-4 py-3 border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
 				<h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">通知型訊息（PNP）</h2>
-				<span className="text-[11px] text-neutral-500">以電話號碼發送；需向 LINE 申請開通，未開通時會顯示失敗原因</span>
+				<span className="text-[11px] text-neutral-500">以電話號碼為對象發送。此功能需向 LINE 申請開通；尚未開通時，發送結果會顯示失敗原因。</span>
 				<button onClick={onClose} className="ml-auto text-xs px-3 py-1.5 rounded-md text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800">
 					關閉
 				</button>
@@ -83,7 +83,7 @@ export function NotificationsPanel({ refreshKey, onClose }: Props) {
 						<input
 							value={phone}
 							onChange={(e) => setPhone(e.target.value)}
-							placeholder="0912-345-678 或 +886…"
+							placeholder="例如 0912-345-678 或 +886912345678"
 							className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-2 py-1.5 text-neutral-900 dark:text-neutral-100"
 						/>
 					</label>
@@ -93,12 +93,12 @@ export function NotificationsPanel({ refreshKey, onClose }: Props) {
 							value={text}
 							onChange={(e) => setText(e.target.value)}
 							maxLength={5000}
-							placeholder="您的訂單已出貨…"
+							placeholder="例如：您的訂單已出貨"
 							className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-2 py-1.5 text-neutral-900 dark:text-neutral-100"
 						/>
 					</label>
 					<label className="flex flex-col gap-0.5 text-neutral-500">
-						備註（例：訂單編號）
+						備註（例如訂單編號）
 						<input
 							value={note}
 							onChange={(e) => setNote(e.target.value)}
@@ -115,7 +115,7 @@ export function NotificationsPanel({ refreshKey, onClose }: Props) {
 				</section>
 
 				{items.length === 0 ? (
-					<p className="text-neutral-500 text-center py-6">還沒有發送過通知型訊息</p>
+					<p className="text-neutral-500 text-center py-6">尚無發送紀錄</p>
 				) : (
 					<table className="w-full bg-white dark:bg-neutral-900 ring-glass rounded-lg">
 						<thead className="text-neutral-500">
@@ -125,7 +125,7 @@ export function NotificationsPanel({ refreshKey, onClose }: Props) {
 								<th className="text-left px-3 py-2 font-medium">內容</th>
 								<th className="text-left px-3 py-2 font-medium">備註</th>
 								<th className="text-left px-3 py-2 font-medium">狀態</th>
-								<th className="text-left px-3 py-2 font-medium">送達</th>
+								<th className="text-left px-3 py-2 font-medium">送達時間</th>
 								<th className="text-left px-3 py-2 font-medium">發送者</th>
 							</tr>
 						</thead>
@@ -151,7 +151,7 @@ export function NotificationsPanel({ refreshKey, onClose }: Props) {
 														{n.error}
 													</div>
 													<button onClick={() => void retry(n)} className="underline mt-0.5">
-														重送
+														重新發送
 													</button>
 												</>
 											)}

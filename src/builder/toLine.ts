@@ -216,36 +216,36 @@ export function validateDraft(draft: BuilderDraft): DraftError[] {
 				break;
 			case "confirm":
 				if (!m.text.trim()) push("問句必填");
-				if (m.actions.length !== 2) push("確認訊息固定兩顆按鈕");
+				if (m.actions.length !== 2) push("確認訊息須有兩個按鈕");
 				m.actions.forEach((a, j) => validateAction(a, `按鈕 ${j + 1}`, push));
 				break;
 			case "buttons":
 				if (!m.text.trim()) push("內文必填");
-				if (m.actions.length < LIMITS.buttons.actionsMin) push("至少一顆按鈕");
+				if (m.actions.length < LIMITS.buttons.actionsMin) push("至少需要一個按鈕");
 				if (m.imageUrl.trim() && !m.imageUrl.startsWith("https://")) push("圖片網址必須是 https://");
 				m.actions.forEach((a, j) => validateAction(a, `按鈕 ${j + 1}`, push));
 				break;
 			case "carousel": {
-				if (m.columns.length < 1) push("至少一張卡");
+				if (m.columns.length < 1) push("至少需要一張卡片");
 				const counts = new Set(m.columns.map((c) => c.actions.length));
-				if (counts.size > 1) push("每張卡的按鈕數量必須一致");
+				if (counts.size > 1) push("每張卡片的按鈕數量須一致");
 				const withImage = m.columns.filter((c) => c.imageUrl.trim()).length;
-				if (withImage && withImage !== m.columns.length) push("圖片要全部的卡都放，或全部不放");
+				if (withImage && withImage !== m.columns.length) push("圖片須所有卡片皆提供，或皆留空");
 				const withTitle = m.columns.filter((c) => c.title.trim()).length;
-				if (withTitle && withTitle !== m.columns.length) push("標題要全部的卡都有，或全部沒有");
+				if (withTitle && withTitle !== m.columns.length) push("標題須所有卡片皆提供，或皆留空");
 				m.columns.forEach((c, k) => {
-					if (!c.text.trim()) push(`卡 ${k + 1}：內文必填`);
-					if (c.actions.length < 1) push(`卡 ${k + 1}：至少一顆按鈕`);
-					if (c.imageUrl.trim() && !c.imageUrl.startsWith("https://")) push(`卡 ${k + 1}：圖片網址必須是 https://`);
-					c.actions.forEach((a, j) => validateAction(a, `卡 ${k + 1} 按鈕 ${j + 1}`, push));
+					if (!c.text.trim()) push(`卡片 ${k + 1}：內文必填`);
+					if (c.actions.length < 1) push(`卡片 ${k + 1}：至少需要一個按鈕`);
+					if (c.imageUrl.trim() && !c.imageUrl.startsWith("https://")) push(`卡片 ${k + 1}：圖片網址必須是 https://`);
+					c.actions.forEach((a, j) => validateAction(a, `卡片 ${k + 1} 按鈕 ${j + 1}`, push));
 				});
 				break;
 			}
 			case "card": {
 				const hasContent =
 					m.headerTitle.trim() || m.title.trim() || m.note.trim() || m.rows.some((r) => r.label.trim() || r.value.trim());
-				if (!hasContent) push("資訊卡至少要有標題、欄位或備註");
-				if (!(m.altText || m.headerTitle || m.title).trim()) push("請填通知列文字（或標題）");
+				if (!hasContent) push("資訊卡至少需有標題、欄位或備註");
+				if (!(m.altText || m.headerTitle || m.title).trim()) push("請填寫通知列文字或標題");
 				m.buttons.forEach((a, j) => validateAction(a, `按鈕 ${j + 1}`, push));
 				const bytes = new TextEncoder().encode(JSON.stringify(toLineMessage(m))).length;
 				if (bytes > LIMITS.flexBubbleBytes) push("資訊卡內容過大，請縮短備註或欄位");
@@ -254,7 +254,7 @@ export function validateDraft(draft: BuilderDraft): DraftError[] {
 		}
 	});
 
-	if (draft.quickReply.length > LIMITS.quickReplyItems) errors.push({ messageIndex: -1, message: `快速回覆最多 ${LIMITS.quickReplyItems} 顆` });
+	if (draft.quickReply.length > LIMITS.quickReplyItems) errors.push({ messageIndex: -1, message: `快速回覆最多 ${LIMITS.quickReplyItems} 個` });
 	draft.quickReply.forEach((a, j) => validateAction(a, `快速回覆 ${j + 1}`, at(-1)));
 
 	return errors;

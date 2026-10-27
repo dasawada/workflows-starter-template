@@ -34,7 +34,7 @@ export const BUILDER_PRESETS: BuilderPreset[] = [
 						{ label: "可排時段", value: "" },
 						{ label: "學生狀況", value: "" },
 					],
-					note: "老師好，這裡是排課小幫手，有收到老師提供的可排課時間，目前媒合到以上學生，再麻煩老師評估看看是否方便承接課程~",
+					note: "老師您好，這裡是排課小幫手。已收到您提供的可排課時間，目前媒合到以上學生，請評估是否方便承接。",
 					buttons: [pb("承接", "accept"), pb("不承接", "decline")],
 				},
 			],
@@ -49,7 +49,7 @@ export const BUILDER_PRESETS: BuilderPreset[] = [
 				{
 					id: newId(),
 					kind: "text",
-					text: `老師好，這裡是排課小幫手，有收到老師提供的可排課時間，目前媒合到以下學生，再麻煩老師評估看看是否方便承接課程~
+					text: `老師您好，這裡是排課小幫手。已收到您提供的可排課時間，目前媒合到以下學生，請評估是否方便承接。
 
 。【學生姓名】「科目」
 。首課日是＿＿，連續課程是＿＿～＿＿
@@ -122,13 +122,13 @@ export const BUILDER_PRESETS: BuilderPreset[] = [
 		name: "追問不承接原因",
 		build: () => ({
 			messages: [
-				{ id: newId(), kind: "text", text: "收到，謝謝老師回覆。方便告訴我們這次不承接的原因嗎？" },
+				{ id: newId(), kind: "text", text: "已收到您的回覆，謝謝。請問方便告知這次不承接的原因嗎？" },
 			],
 			quickReply: [
 				pb("時間衝突", "reason:time"),
 				pb("科目不符", "reason:subject"),
 				pb("距離太遠", "reason:distance"),
-				{ ...pb("其他（我來打字）", "reason:other", "其他"), openKeyboard: true, fillInText: "不承接的原因是：" },
+				{ ...pb("其他（自行輸入）", "reason:other", "其他"), openKeyboard: true, fillInText: "不承接的原因是：" },
 			],
 		}),
 	},

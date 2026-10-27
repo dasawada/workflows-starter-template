@@ -54,7 +54,7 @@ export function MessageBubble({ message, onRetry }: Props) {
 					{imageSet && ` · 第 ${imageSet.index}/${imageSet.total} 張`}
 					{message.editedAt && !message.unsentAt && " · 已編輯"}
 					{imported && (
-						<span title="來自官方後台 CSV 匯入，非 webhook 即時紀錄，可信度不同" className="px-1 rounded bg-neutral-200 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-300">
+						<span title="此紀錄來自官方後台 CSV 匯入，而非即時接收的事件" className="px-1 rounded bg-neutral-200 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-300">
 							匯入紀錄
 						</span>
 					)}
@@ -71,27 +71,27 @@ export function MessageBubble({ message, onRetry }: Props) {
 function DeliveryBadge({ message, onRetry }: { message: Message; onRetry?: (id: string) => void }) {
 	switch (message.deliveryStatus) {
 		case "sent":
-			return <span title="LINE 已接受這則訊息（無法得知使用者是否已讀）">· ✓ 已送出</span>;
+			return <span title="LINE 已接受此訊息；無法得知使用者是否已讀">· 已發送</span>;
 		case "pending":
-			return <span className="text-amber-600 dark:text-amber-400" title="尚未收到 LINE 確認，系統會自動重試">· ⏳ 送出中</span>;
+			return <span className="text-amber-600 dark:text-amber-400" title="尚未收到 LINE 的確認，系統將自動重試">· 發送中</span>;
 		case "failed":
 			return (
 				<span className="text-red-600 dark:text-red-400" title={String(message.metadata?.deliveryError ?? "")}>
-					· ✗ 送出失敗
+					· 發送失敗
 					{onRetry && (
 						<button onClick={() => onRetry(message.id)} className="ml-1 underline">
-							重試
+							重新發送
 						</button>
 					)}
 				</span>
 			);
 		case "unknown":
 			return (
-				<span className="text-red-600 dark:text-red-400" title="超過 24 小時無法確認 LINE 是否送出，請向使用者確認">
-					· ? 結果不明
+				<span className="text-red-600 dark:text-red-400" title="超過 24 小時仍無法確認 LINE 是否已發送，請向使用者確認">
+					· 結果不明
 					{onRetry && (
 						<button onClick={() => onRetry(message.id)} className="ml-1 underline">
-							重試
+							重新發送
 						</button>
 					)}
 				</span>
@@ -129,7 +129,7 @@ function QuoteBlock({ quote, mine }: { quote: MessageQuote; mine: boolean }) {
 							? "[貼圖]"
 							: quote.type === "location"
 								? "[位置]"
-								: "[訊息內容已不可用]");
+								: "[訊息內容已無法取得]");
 	return (
 		<div className={`border-l-2 pl-2 mb-1.5 text-xs ${tone}`}>
 			<div className="font-medium">引用{who}訊息</div>
@@ -138,13 +138,13 @@ function QuoteBlock({ quote, mine }: { quote: MessageQuote; mine: boolean }) {
 	);
 }
 
-/** 附件還沒有、或永遠拿不到時，要說清楚是哪一種 */
+/** 附件尚未取得或已無法取得時，明確標示屬於哪一種情況 */
 function MediaPending({ message, label }: { message: Message; label: string }) {
 	if (message.mediaStatus === "expired") {
-		return <span className="italic opacity-70">{label}已超過 LINE 保留期限，無法取得</span>;
+		return <span className="italic opacity-70">{label}已逾 LINE 平台保留期限，無法取得</span>;
 	}
 	if (message.mediaStatus === "failed") {
-		return <span className="italic opacity-70">{label}下載失敗，系統會再嘗試</span>;
+		return <span className="italic opacity-70">{label}下載失敗，系統將再次嘗試</span>;
 	}
 	return <span className="italic opacity-70">{label}下載中…</span>;
 }
@@ -173,8 +173,8 @@ function Content({ message }: { message: Message }) {
 					{message.type === "prompt" && (
 						<div className="text-[11px] opacity-90 px-1.5">
 							{answered
-								? `✓ 已回覆：${(meta.choiceLabel as string) ?? (meta.choice as string)}`
-								: "⏳ 待回覆"}
+								? `已回覆：${(meta.choiceLabel as string) ?? (meta.choice as string)}`
+								: "待回覆"}
 						</div>
 					)}
 				</div>
@@ -224,11 +224,11 @@ function Content({ message }: { message: Message }) {
 			const size = typeof meta.fileSize === "number" ? formatBytes(meta.fileSize) : null;
 			return mediaSrc ? (
 				<a href={mediaSrc} download={name} className="underline">
-					📎 {name}
+					附件：{name}
 					{size && <span className="opacity-70"> ({size})</span>}
 				</a>
 			) : (
-				<MediaPending message={message} label={`📎 ${name}`} />
+				<MediaPending message={message} label={`附件 ${name} `} />
 			);
 		}
 
@@ -241,7 +241,7 @@ function Content({ message }: { message: Message }) {
 					: undefined;
 			return (
 				<a href={href} target="_blank" rel="noreferrer" className="underline">
-					📍 {message.text || "位置"}
+					位置：{message.text || "未提供地址"}
 				</a>
 			);
 		}

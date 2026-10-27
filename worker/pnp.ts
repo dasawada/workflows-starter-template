@@ -71,8 +71,8 @@ async function pushNotification(env: Env, client: LineClient, notification: Noti
 /** 只允許重送 failed 的；PNP 沒有 retry key，sent 的重送會真的再送一次 */
 export async function retryNotification(env: Env, client: LineClient, id: string): Promise<Notification | PnpError> {
 	const notification = await getNotification(env.DB, id);
-	if (!notification) return { error: "找不到這筆通知", httpStatus: 404 };
-	if (notification.status !== "failed") return { error: "只有發送失敗的通知可以重送", httpStatus: 409 };
+	if (!notification) return { error: "找不到此筆通知", httpStatus: 404 };
+	if (notification.status !== "failed") return { error: "僅發送失敗的通知可重新發送", httpStatus: 409 };
 	const hash = await getNotificationPhoneHash(env.DB, id);
 	if (!hash) return { error: "找不到收件者", httpStatus: 500 };
 	return pushNotification(env, client, notification, hash);
@@ -87,7 +87,7 @@ export async function handleDeliveryEvent(env: Env, deliveryTag: string, timesta
 			kind: "send_unknown",
 			severity: "info",
 			dedupeKey: `pnp_foreign:${deliveryTag}`,
-			title: "收到不屬於本系統的通知型訊息送達事件，可能有其他系統共用此 channel 發送 PNP",
+			title: "收到非本系統發送的通知型訊息送達事件，可能有其他系統共用此 Channel 發送通知",
 			details: { deliveryTag, timestamp },
 		});
 		return;

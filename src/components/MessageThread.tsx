@@ -128,12 +128,12 @@ export function MessageThread({
 						<span>LINE · {conversation.externalId}</span>
 						{conversation.assignedTo && (
 							<span className="px-1.5 rounded bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-300">
-								{mine ? "你接手中" : `${conversation.assignedTo} 接手中`}
+								{mine ? "由您負責" : `由 ${conversation.assignedTo} 負責`}
 							</span>
 						)}
 						{otherViewers.length > 0 && (
-							<span className="text-amber-600 dark:text-amber-400" title="其他客服也打開了這個對話">
-								👀 {otherViewers.join("、")} 也在看
+							<span className="text-amber-600 dark:text-amber-400" title="其他客服人員目前也開啟了此對話">
+								{otherViewers.join("、")} 正在檢視此對話
 							</span>
 						)}
 					</div>
@@ -146,7 +146,7 @@ export function MessageThread({
 				{agentName && (
 					<button
 						onClick={mine ? onRelease : onAssign}
-						title={mine ? "交還給其他客服" : conversation.assignedTo ? `從 ${conversation.assignedTo} 手上接手` : "標記為由你負責"}
+						title={mine ? "解除您的負責狀態" : conversation.assignedTo ? `接手 ${conversation.assignedTo} 負責的對話` : "將此對話標記為由您負責"}
 						className={`text-xs font-medium rounded-md px-3 py-1.5 border transition-colors ${
 							mine
 								? "border-sky-300 dark:border-sky-700 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-950/40"
@@ -158,7 +158,7 @@ export function MessageThread({
 				)}
 				<button
 					onClick={() => setReporting((v) => !v)}
-					title="客人說有傳、這裡卻沒有？回報後會記入完整性中心"
+					title="若使用者表示曾傳送訊息但此處未顯示，可在此回報；系統會記錄於完整性中心"
 					className="text-xs font-medium rounded-md px-3 py-1.5 border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
 				>
 					回報缺失
@@ -174,9 +174,9 @@ export function MessageThread({
 			{gaps.length > 0 && (
 				<div className="px-4 py-2 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200">
 					<div className="flex items-center gap-2">
-						<span className="font-medium">這個對話有 {gaps.length} 項未解決的資料缺口，畫面上的紀錄可能不完整</span>
+						<span className="font-medium">此對話有 {gaps.length} 項尚未處理的完整性事件，顯示的紀錄可能不完整。</span>
 						<button onClick={onOpenIntegrity} className="ml-auto underline">
-							到完整性中心處理
+							前往完整性中心
 						</button>
 					</div>
 					<ul className="mt-1 space-y-0.5">
@@ -197,7 +197,7 @@ export function MessageThread({
 						value={reportNote}
 						onChange={(e) => setReportNote(e.target.value)}
 						onKeyDown={(e) => e.key === "Enter" && void submitReport()}
-						placeholder="描述缺了什麼、大約什麼時候（例：客人說早上 10 點傳過照片）"
+						placeholder="請說明缺少的內容與大約時間（例如：使用者表示上午 10 時曾傳送照片）"
 						className="flex-1 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-emerald-500"
 					/>
 					<button

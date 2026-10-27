@@ -51,12 +51,14 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 | `migrations/` | D1 schema，新增欄位一律新開 migration 檔，不改舊檔 |
 | `shared/types.ts` | 前後端共用型別，API 回傳格式改動要先改這裡 |
 | `src/` | React 客服台；`src/api.ts` 是唯一打 API 的地方 |
+| `src/route.ts` | 畫面狀態（選取的對話、面板、互動訊息對話框）與網址的對應；App 以 `navigate()` 改網址、監聽 `popstate`，瀏覽器上一頁才有作用。新增頁面或對話框時要加進這裡，不要另外開 useState |
 | `test/` | Vitest 跑在 workerd 內；LINE API 用 `vi.stubGlobal("fetch")` 攔截（此版本沒有 `fetchMock`） |
 
 ## 慣例
 
 - TypeScript 開了 `erasableSyntaxOnly`：不能用 constructor 參數屬性、enum、namespace。
 - 縮排用 tab。回覆與註解用繁體中文，識別字用英文。
+- 使用者看得到的文案（前端、後端回傳的錯誤與系統訊息、完整性事件標題）一律正式書面語：不用口語（拿、塞、搞、看看、～）、不用表情符號、量詞用「個」「張卡片」「則」、對使用者稱「您」、提示句以句號結尾。
 - 新增渠道（如 Teams）時：新增 `worker/<channel>.ts` 與 `worker/webhook-<channel>.ts`，資料寫入仍走 `db.ts`，`channel` 欄位填對應值，`handleReply` 依 `channel` 分派。
 - 部署流程改動（新 binding、新資源）要同步更新 README 的「正式部署」段落。
 

@@ -27,7 +27,7 @@ export function Login({ error, busy, initialName, onSubmit }: Props) {
 						客服收發台
 					</h1>
 					<p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
-						請輸入客服台存取密鑰（CONSOLE_TOKEN）
+						請輸入客服名稱與客服台存取密鑰（CONSOLE_TOKEN）
 					</p>
 				</div>
 				<input
@@ -36,7 +36,7 @@ export function Login({ error, busy, initialName, onSubmit }: Props) {
 					value={name}
 					onChange={(e) => setName(e.target.value)}
 					maxLength={40}
-					placeholder="你的名字（同事會看到，用於接手與避免重複回覆）"
+					placeholder="客服名稱（供同事識別，用於接手與回覆衝突偵測）"
 					className="w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:ring-2 focus:ring-emerald-500"
 				/>
 				<input

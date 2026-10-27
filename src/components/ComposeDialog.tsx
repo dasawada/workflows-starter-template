@@ -62,7 +62,7 @@ export function ComposeDialog({ onClose, onSend, initialMessages, onBackToBuilde
 	const pickPreset = (key: string) => {
 		const p = MESSAGE_PRESETS.find((x) => x.key === key);
 		if (!p) return;
-		if (text.trim() && text !== JSON.stringify(preset?.messages, null, 2) && !confirm("切換範例會覆蓋目前的內容，確定？")) return;
+		if (text.trim() && text !== JSON.stringify(preset?.messages, null, 2) && !confirm("切換範例將覆蓋目前內容，是否繼續？")) return;
 		setPresetKey(key);
 		const next = JSON.stringify(p.messages, null, 2);
 		setText(next);
@@ -86,7 +86,7 @@ export function ComposeDialog({ onClose, onSend, initialMessages, onBackToBuilde
 			await onSend({ messages: parsed.messages, templateKey: presetKey, allowChange });
 			onClose();
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "送出失敗");
+			setError(err instanceof Error ? err.message : "發送失敗");
 		} finally {
 			setSending(false);
 		}
@@ -105,7 +105,7 @@ export function ComposeDialog({ onClose, onSend, initialMessages, onBackToBuilde
 					<h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">互動訊息（JSON 模式）</h2>
 					{onBackToBuilder && (
 						<button onClick={onBackToBuilder} className="text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 hover:underline underline-offset-2">
-							← 回編輯台
+							← 返回編輯台
 						</button>
 					)}
 					<select value={presetKey} onChange={(e) => pickPreset(e.target.value)} className={`${field} w-auto py-1.5`}>
@@ -138,7 +138,7 @@ export function ComposeDialog({ onClose, onSend, initialMessages, onBackToBuilde
 
 				{preset && (
 					<p className="px-5 py-2 text-[11px] text-neutral-500 dark:text-neutral-400 border-b border-neutral-100 dark:border-neutral-800">
-						{preset.hint}{" "}postback 的 <code>data</code> 只要填選項值，送出時會自動加上追蹤 id。
+						{preset.hint}{" "}postback 的 <code>data</code> 只需填入選項值，發送時會自動加上追蹤 id。
 					</p>
 				)}
 
@@ -155,7 +155,7 @@ export function ComposeDialog({ onClose, onSend, initialMessages, onBackToBuilde
 								<span className="text-red-600">{parsed.error}</span>
 							) : (
 								<span className="text-emerald-600">
-									JSON 正確 · {parsed.messages?.length} 則 · {postbackCount} 顆可追蹤按鈕
+									JSON 正確 · {parsed.messages?.length} 則 · {postbackCount} 個可追蹤按鈕
 								</span>
 							)}
 							<span className="ml-auto text-neutral-400">{(bytes / 1024).toFixed(1)} KB</span>
@@ -176,7 +176,7 @@ export function ComposeDialog({ onClose, onSend, initialMessages, onBackToBuilde
 					{postbackCount > 0 && (
 						<label className="mr-auto flex items-center gap-1.5 text-xs text-neutral-600 dark:text-neutral-400">
 							<input type="checkbox" checked={allowChange} onChange={(e) => setAllowChange(e.target.checked)} className="accent-emerald-600" />
-							允許使用者更改回覆（取最後一次）
+							允許使用者變更回覆（以最後一次為準）
 						</label>
 					)}
 					{error && <span className="text-xs text-red-600">{error}</span>}
@@ -188,7 +188,7 @@ export function ComposeDialog({ onClose, onSend, initialMessages, onBackToBuilde
 						disabled={sending || !parsed.messages}
 						className="text-sm font-medium px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white"
 					>
-						{sending ? "送出中…" : "送出"}
+						{sending ? "發送中…" : "發送"}
 					</button>
 				</div>
 			</div>

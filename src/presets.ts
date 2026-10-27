@@ -10,7 +10,7 @@ export interface MessagePreset {
 	messages: unknown[];
 }
 
-const COURSE_TEXT = `老師好，這裡是排課小幫手，有收到老師提供的可排課時間，目前媒合到以下學生，再麻煩老師評估看看是否方便承接課程~
+const COURSE_TEXT = `老師您好，這裡是排課小幫手。已收到您提供的可排課時間，目前媒合到以下學生，請評估是否方便承接。
 
 。【王小明】「國中數學」
 。首課日是 11/3（一），連續課程是 11/3～12/22
@@ -25,7 +25,7 @@ export const MESSAGE_PRESETS: MessagePreset[] = [
 	{
 		key: "text-confirm",
 		name: "文字 + Confirm（兩則）",
-		hint: "正文一則、問句加兩顆按鈕一則。Confirm 的 text 最多 240 字，按鈕最多 2 顆。",
+		hint: "正文一則，問句與兩個按鈕一則。Confirm 的 text 上限 240 字，按鈕最多 2 個。",
 		messages: [
 			{ type: "text", text: COURSE_TEXT },
 			{
@@ -45,7 +45,7 @@ export const MESSAGE_PRESETS: MessagePreset[] = [
 	{
 		key: "buttons",
 		name: "Buttons template（一則）",
-		hint: "標題 + 文字 + 最多 4 顆按鈕。text 最多 160 字；有 title 或圖片時只剩 60 字。",
+		hint: "標題、文字與最多 4 個按鈕。text 上限 160 字；有 title 或圖片時上限為 60 字。",
 		messages: [
 			{
 				type: "template",
@@ -66,8 +66,8 @@ export const MESSAGE_PRESETS: MessagePreset[] = [
 	},
 	{
 		key: "carousel",
-		name: "Carousel template（多張卡）",
-		hint: "最多 10 張卡，每張最多 3 顆按鈕、text 最多 120 字，所有卡的按鈕數要一致。",
+		name: "Carousel template（多張卡片）",
+		hint: "最多 10 張卡片，每張最多 3 個按鈕、text 上限 120 字，所有卡片的按鈕數須一致。",
 		messages: [
 			{
 				type: "template",
@@ -99,7 +99,7 @@ export const MESSAGE_PRESETS: MessagePreset[] = [
 	{
 		key: "flex-card",
 		name: "Flex 單卡（長文 + 欄位 + 按鈕）",
-		hint: "一張卡放下所有資訊與按鈕，文字沒有字數上限。可到 LINE Flex Message Simulator 調版面後把 JSON 貼回來。",
+		hint: "以單張卡片呈現所有資訊與按鈕，文字無字數上限。可於 LINE Flex Message Simulator 調整版面後貼回 JSON。",
 		messages: [
 			{
 				type: "flex",
@@ -189,7 +189,7 @@ export const MESSAGE_PRESETS: MessagePreset[] = [
 	{
 		key: "flex-ticket",
 		name: "Flex 課程票券（承接 / 有條件承接 / 拒接）",
-		hint: "票券風格：色帶標頭、虛線分隔、底部三顆按鈕。「有條件承接」會開啟鍵盤並預填文字（inputOption/fillInText，LINE 12.6.0+），老師改幾個字就能送出。",
+		hint: "票券風格：色帶標頭、虛線分隔、底部三個按鈕。「有條件承接」會開啟鍵盤並預填文字（inputOption/fillInText，LINE 12.6.0 以上），老師稍作修改即可發送。",
 		messages: [
 			{
 				type: "flex",
@@ -268,7 +268,7 @@ export const MESSAGE_PRESETS: MessagePreset[] = [
 								style: "secondary",
 								action: {
 									type: "postback",
-									label: "有條件承接（我來補充）",
+									label: "有條件承接（補充說明）",
 									data: "conditional",
 									displayText: "有條件承接",
 									inputOption: "openKeyboard",
@@ -289,7 +289,7 @@ export const MESSAGE_PRESETS: MessagePreset[] = [
 	{
 		key: "flex-progress",
 		name: "Flex 媒合進度條（純資訊，不追蹤）",
-		hint: "用無間距的水平色塊做進度條。沒有 postback 按鈕時不會建立追蹤紀錄，適合純通知。",
+		hint: "以無間距的水平色塊呈現進度。沒有 postback 按鈕時不會建立追蹤紀錄，適合純通知。",
 		messages: [
 			{
 				type: "flex",

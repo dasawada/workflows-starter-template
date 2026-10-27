@@ -26,7 +26,7 @@ export async function storeMedia(env: Env, client: LineClient, message: Message)
 				conversationId: message.conversationId,
 				messageId: message.id,
 				dedupeKey,
-				title: "附件已超過 LINE 保留期限，無法再取得",
+				title: "附件已逾 LINE 平台保留期限，無法再取得",
 				details: { type: message.type, lineMessageId, status: content.status },
 				startedAt: message.createdAt,
 			});
@@ -41,7 +41,7 @@ export async function storeMedia(env: Env, client: LineClient, message: Message)
 			customMetadata: { conversationId: message.conversationId, messageId: message.id },
 		});
 		const updated = await updateMessageMedia(env.DB, message.id, key, content.contentType);
-		if (attempts > 1) await resolveIntegrity(env, dedupeKey, "附件已補抓成功");
+		if (attempts > 1) await resolveIntegrity(env, dedupeKey, "附件已重新下載成功");
 		if (updated) {
 			const conversation = await getConversation(env.DB, message.conversationId);
 			if (conversation) {

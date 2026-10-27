@@ -124,7 +124,7 @@ export function ImportPanel({ onOpenConversation, onClose }: Props) {
 		<div className="flex flex-col h-full">
 			<header className="flex items-center gap-2 px-4 py-3 border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
 				<h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">歷史紀錄匯入</h2>
-				<span className="text-[11px] text-neutral-500">LINE 官方帳號管理後台 → 聊天 → 匯出的 CSV；只有文字，沒有附件與 userId</span>
+				<span className="text-[11px] text-neutral-500">適用於 LINE 官方帳號管理後台匯出的聊天紀錄 CSV。檔案僅含文字內容，不含附件與使用者 ID。</span>
 				<button onClick={onClose} className="ml-auto text-xs px-3 py-1.5 rounded-md text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800">
 					關閉
 				</button>
@@ -136,11 +136,11 @@ export function ImportPanel({ onOpenConversation, onClose }: Props) {
 				<section className="rounded-lg bg-white dark:bg-neutral-900 ring-glass p-3 space-y-2">
 					<div className="flex items-center gap-2">
 						<label className="px-2.5 py-1 rounded-md border border-neutral-300 dark:border-neutral-700 cursor-pointer hover:bg-neutral-100 dark:hover:bg-neutral-800">
-							選擇 CSV 檔
+							選擇 CSV 檔案
 							<input type="file" accept=".csv,text/csv,text/plain" className="hidden" onChange={(e) => void onFile(e.target.files?.[0])} />
 						</label>
 						{fileName && <span className="text-neutral-500">{fileName}</span>}
-						<span className="text-neutral-400">或直接貼上內容：</span>
+						<span className="text-neutral-400">或於下方貼上檔案內容</span>
 					</div>
 					<textarea
 						value={csv}
@@ -154,11 +154,11 @@ export function ImportPanel({ onOpenConversation, onClose }: Props) {
 					/>
 					<div className="flex items-center gap-2">
 						<label className="text-neutral-500">
-							官方帳號在 CSV 裡的發送者名稱
+							官方帳號於 CSV 中的發送者名稱
 							<input
 								value={accountName}
 								onChange={(e) => setAccountName(e.target.value)}
-								placeholder="例：商店"
+								placeholder="例如：商店"
 								className="ml-2 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-2 py-1"
 							/>
 						</label>
@@ -167,7 +167,7 @@ export function ImportPanel({ onOpenConversation, onClose }: Props) {
 							disabled={busy || !csv.trim()}
 							className="ml-auto px-3 py-1.5 rounded-md bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 disabled:opacity-50"
 						>
-							{busy ? "處理中…" : "預覽與配對"}
+							{busy ? "處理中…" : "預覽並配對"}
 						</button>
 					</div>
 				</section>
@@ -176,7 +176,7 @@ export function ImportPanel({ onOpenConversation, onClose }: Props) {
 					<section className="rounded-lg bg-white dark:bg-neutral-900 ring-glass p-3 space-y-3">
 						<div className="flex flex-wrap gap-x-4 gap-y-1 text-neutral-600 dark:text-neutral-300">
 							<span>共 {preview.totalRows} 列</span>
-							<span>無法解析時間 {preview.invalidRows} 列（會略過）</span>
+							<span>時間無法解析 {preview.invalidRows} 列（將略過）</span>
 							{preview.rangeStart && (
 								<span>
 									期間 {formatListTime(preview.rangeStart)} – {formatListTime(preview.rangeEnd)}
@@ -185,7 +185,7 @@ export function ImportPanel({ onOpenConversation, onClose }: Props) {
 						</div>
 
 						<div>
-							<div className="font-medium mb-1">欄位對應{preview.missing.length > 0 && <span className="text-red-600 dark:text-red-400 ml-2">缺少：{preview.missing.map((m) => COLUMN_LABEL[m]).join("、")}</span>}</div>
+							<div className="font-medium mb-1">欄位對應{preview.missing.length > 0 && <span className="text-red-600 dark:text-red-400 ml-2">尚未指定：{preview.missing.map((m) => COLUMN_LABEL[m]).join("、")}</span>}</div>
 							<div className="grid grid-cols-2 md:grid-cols-4 gap-2">
 								{(Object.keys(COLUMN_LABEL) as ImportColumn[]).map((col) => (
 									<label key={col} className="flex flex-col gap-0.5 text-neutral-500">
@@ -237,7 +237,7 @@ export function ImportPanel({ onOpenConversation, onClose }: Props) {
 						)}
 
 						<div>
-							<div className="font-medium mb-1">名稱配對（{preview.chats.length} 個）</div>
+							<div className="font-medium mb-1">名稱配對（共 {preview.chats.length} 個）</div>
 							<ul className="space-y-1">
 								{preview.chats.map((c) => (
 									<li key={c.name} className="flex items-center gap-2">
@@ -249,7 +249,7 @@ export function ImportPanel({ onOpenConversation, onClose }: Props) {
 											onChange={(id) => setAssignments((prev) => ({ ...prev, [c.name]: id }))}
 										/>
 										{!c.conversationId && !assignments[c.name] && (
-											<span className="text-amber-600 dark:text-amber-400">{c.candidates.length > 1 ? "多筆同名，請指定" : "找不到，匯入後可再指派"}</span>
+											<span className="text-amber-600 dark:text-amber-400">{c.candidates.length > 1 ? "有多筆同名對話，請指定其一" : "查無對應對話，可於匯入後指派"}</span>
 										)}
 									</li>
 								))}
@@ -271,13 +271,13 @@ export function ImportPanel({ onOpenConversation, onClose }: Props) {
 				{result && (
 					<section className="rounded-lg bg-emerald-50 dark:bg-emerald-950/40 ring-1 ring-emerald-200 dark:ring-emerald-900 p-3">
 						匯入完成：寫入 {result.inserted} 則、重複略過 {result.duplicates} 則、待指派 {result.unmatched} 列、無法解析 {result.skipped} 列。
-						{result.unmatched > 0 && "下方可以把找不到對話的名稱指派到正確的對話。"}
+						{result.unmatched > 0 && "可於下方將尚未配對的名稱指派至對應的對話。"}
 					</section>
 				)}
 
 				{selectedBatch && groups.length > 0 && (
 					<section className="rounded-lg bg-white dark:bg-neutral-900 ring-glass p-3 space-y-2">
-						<div className="font-medium">待指派（批次 {formatListTime(selectedBatch.createdAt)}）</div>
+						<div className="font-medium">待指派紀錄（批次建立於 {formatListTime(selectedBatch.createdAt)}）</div>
 						{groups.map((g) => (
 							<div key={g.chatName} className="flex items-center gap-2 border-t border-neutral-100 dark:border-neutral-800 pt-2">
 								<div className="w-48">
@@ -299,7 +299,7 @@ export function ImportPanel({ onOpenConversation, onClose }: Props) {
 				<section>
 					<div className="font-medium mb-1 text-neutral-700 dark:text-neutral-300">匯入歷史</div>
 					{batches.length === 0 ? (
-						<p className="text-neutral-500">還沒有匯入過</p>
+						<p className="text-neutral-500">尚無匯入紀錄</p>
 					) : (
 						<table className="w-full bg-white dark:bg-neutral-900 ring-glass rounded-lg">
 							<thead className="text-neutral-500">
@@ -321,7 +321,7 @@ export function ImportPanel({ onOpenConversation, onClose }: Props) {
 										className={`border-t border-neutral-100 dark:border-neutral-800 cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/60 ${selectedBatch?.id === b.id ? "bg-emerald-50 dark:bg-emerald-950/30" : ""}`}
 									>
 										<td className="px-3 py-2 whitespace-nowrap">{formatListTime(b.createdAt)}</td>
-										<td className="px-3 py-2 truncate max-w-40">{b.fileName ?? "（貼上）"}</td>
+										<td className="px-3 py-2 truncate max-w-40">{b.fileName ?? "（直接貼上）"}</td>
 										<td className="px-3 py-2">{b.inserted}</td>
 										<td className="px-3 py-2">{b.duplicates}</td>
 										<td className={`px-3 py-2 ${b.unmatched > 0 ? "text-amber-600 dark:text-amber-400 font-medium" : ""}`}>{b.unmatched}</td>
@@ -371,7 +371,7 @@ function ChatAssign({
 			onChange={(e) => onChange(e.target.value)}
 			className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-2 py-1"
 		>
-			<option value="">— 不匯入 —</option>
+			<option value="">不匯入</option>
 			{candidates.map((c) => (
 				<option key={c.id} value={c.id}>
 					{c.displayName ?? c.externalId}（{c.externalId.slice(0, 8)}…）
@@ -403,7 +403,7 @@ function ConversationPicker({ onPick, compact, picked }: { onPick: (id: string) 
 			<input
 				value={q}
 				onChange={(e) => setQ(e.target.value)}
-				placeholder={picked ? `已選 ${picked}` : "搜尋對話名稱或 ID…"}
+				placeholder={picked ? `已選擇 ${picked}` : "搜尋對話名稱或 ID"}
 				className={`rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-2 py-1 ${compact ? "w-44" : "w-56"}`}
 			/>
 			{results.length > 0 && (

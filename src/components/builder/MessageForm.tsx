@@ -42,7 +42,7 @@ export function MessageForm({ message: m, onChange }: Props) {
 						value={m.altText}
 						onChange={(v) => onChange({ ...m, altText: v })}
 						max={LIMITS.altText}
-						hint="手機通知與聊天列表顯示的文字，留空用問句"
+						hint="顯示於手機通知與聊天列表的文字；留空則使用問句"
 					/>
 					<ActionList actions={m.actions} min={2} max={2} onChange={(actions) => onChange({ ...m, actions })} />
 				</div>
@@ -61,10 +61,10 @@ export function MessageForm({ message: m, onChange }: Props) {
 						multiline
 						rows={3}
 						required
-						hint={hasTitleOrImage ? "有標題或圖片時內文只能 60 字" : "沒有標題與圖片時可到 160 字"}
+						hint={hasTitleOrImage ? "有標題或圖片時，內文上限為 60 字" : "無標題與圖片時，內文上限為 160 字"}
 					/>
 					<TextField label="圖片網址（選填）" value={m.imageUrl} onChange={(v) => onChange({ ...m, imageUrl: v })} max={LIMITS.imageUrl} type="url" placeholder="https://" />
-					<TextField label="通知列文字" value={m.altText} onChange={(v) => onChange({ ...m, altText: v })} max={LIMITS.altText} hint="留空用標題或內文" />
+					<TextField label="通知列文字" value={m.altText} onChange={(v) => onChange({ ...m, altText: v })} max={LIMITS.altText} hint="留空則使用標題或內文" />
 					<ActionList actions={m.actions} min={LIMITS.buttons.actionsMin} max={LIMITS.buttons.actionsMax} onChange={(actions) => onChange({ ...m, actions })} />
 				</div>
 			);
@@ -82,14 +82,14 @@ export function MessageForm({ message: m, onChange }: Props) {
 			const removeColumn = (i: number) => onChange({ ...m, columns: m.columns.filter((_, j) => j !== i) });
 			return (
 				<div className="space-y-3">
-					<TextField label="通知列文字" value={m.altText} onChange={(v) => onChange({ ...m, altText: v })} max={LIMITS.altText} hint="留空用第一張卡的標題" />
-					<p className="text-[11px] text-neutral-500">每張卡的按鈕數量要一樣；圖片與標題要全部有或全部沒有。</p>
+					<TextField label="通知列文字" value={m.altText} onChange={(v) => onChange({ ...m, altText: v })} max={LIMITS.altText} hint="留空則使用第一張卡片的標題" />
+					<p className="text-[11px] text-neutral-500">每張卡片的按鈕數量須一致；圖片與標題須全部提供或全部留空。</p>
 					{m.columns.map((c, i) => {
 						const hasTitleOrImage = Boolean(c.title.trim() || c.imageUrl.trim());
 						return (
 							<Group
 								key={i}
-								title={`卡 ${i + 1}`}
+								title={`卡片 ${i + 1}`}
 								right={m.columns.length > 1 ? <SmallButton onClick={() => removeColumn(i)} danger>移除</SmallButton> : null}
 							>
 								<TextField label="標題" value={c.title} onChange={(v) => setColumn(i, { ...c, title: v })} max={LIMITS.carousel.title} />
@@ -149,8 +149,8 @@ export function MessageForm({ message: m, onChange }: Props) {
 							</div>
 						))}
 					</Group>
-					<TextField label="備註長文" value={m.note} onChange={(v) => onChange({ ...m, note: v })} max={LIMITS.card.note} multiline rows={4} />
-					<TextField label="通知列文字" value={m.altText} onChange={(v) => onChange({ ...m, altText: v })} max={LIMITS.altText} hint="留空用色帶標題或主標題" />
+					<TextField label="備註" value={m.note} onChange={(v) => onChange({ ...m, note: v })} max={LIMITS.card.note} multiline rows={4} />
+					<TextField label="通知列文字" value={m.altText} onChange={(v) => onChange({ ...m, altText: v })} max={LIMITS.altText} hint="留空則使用色帶標題或主標題" />
 					<ActionList actions={m.buttons} min={0} max={LIMITS.card.buttonsMax} labelMax={LIMITS.flexButtonLabel} onChange={(buttons) => onChange({ ...m, buttons })} />
 				</div>
 			);

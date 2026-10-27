@@ -127,7 +127,7 @@ async function consumeDeadLetters(batch: MessageBatch<LineEventJob>, env: Env): 
 			severity: "error",
 			conversationId: target?.conversationId ?? null,
 			dedupeKey: event.webhookEventId ? `dlq:${event.webhookEventId}` : null,
-			title: `LINE 事件處理連續失敗，已放棄：${event.type}`,
+			title: `LINE 事件處理連續失敗，已中止處理：${event.type}`,
 			details: { event, receivedAt: msg.body.receivedAt, attempts: msg.attempts },
 			startedAt: event.timestamp ?? msg.body.receivedAt,
 		});
@@ -360,16 +360,16 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 		if ((action === "assign" || action === "release") && request.method === "POST") {
 			const body = await readJson<{ agent?: string }>(request);
 			const agent = action === "assign" ? (body.agent?.trim().slice(0, 40) || agentNameOf(request)) : null;
-			if (action === "assign" && !agent) return Response.json({ error: "需要客服名稱" }, { status: 400 });
+			if (action === "assign" && !agent) return Response.json({ error: "請提供客服名稱" }, { status: 400 });
 			const previous = conversation.assignedTo;
 			const updated = await assignConversation(env.DB, conversationId, agent);
 			if (!updated) return Response.json({ error: "Conversation not found" }, { status: 404 });
 			const note =
 				action === "assign"
 					? previous && previous !== agent
-						? `${agent} 從 ${previous} 手上接手此對話`
-						: `${agent} 接手此對話`
-					: `${previous ?? agentNameOf(request) ?? "客服"} 交還此對話`;
+						? `${agent} 已接手此對話（原負責人：${previous}）`
+						: `${agent} 已接手此對話`
+					: `${previous ?? agentNameOf(request) ?? "客服人員"} 已交還此對話`;
 			const inserted = await insertMessage(env.DB, {
 				id: crypto.randomUUID(),
 				conversationId,

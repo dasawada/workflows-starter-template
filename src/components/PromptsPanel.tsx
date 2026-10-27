@@ -25,7 +25,7 @@ export function PromptsPanel({ prompts, loading, onRefresh, onOpenConversation, 
 	}, [filter, onRefresh]);
 
 	const exportCsv = () => {
-		const header = ["送出時間", "對象", "範本", "問句", "狀態", "選擇", "回覆時間", "變數"];
+		const header = ["發送時間", "對象", "範本", "問句", "狀態", "選擇", "回覆時間", "變數"];
 		const rows = prompts.map((p) => [
 			new Date(p.createdAt).toLocaleString("zh-TW"),
 			p.displayName ?? p.conversationId,
@@ -87,13 +87,13 @@ export function PromptsPanel({ prompts, loading, onRefresh, onOpenConversation, 
 					<p className="p-6 text-sm text-neutral-500 text-center">載入中…</p>
 				)}
 				{!loading && prompts.length === 0 && (
-					<p className="p-6 text-sm text-neutral-500 text-center">還沒有發送過可追蹤的訊息</p>
+					<p className="p-6 text-sm text-neutral-500 text-center">尚無可追蹤訊息的發送紀錄</p>
 				)}
 				{prompts.length > 0 && (
 					<table className="w-full text-xs">
 						<thead className="sticky top-0 bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400">
 							<tr>
-								<th className="text-left px-3 py-2 font-medium">送出</th>
+								<th className="text-left px-3 py-2 font-medium">發送時間</th>
 								<th className="text-left px-3 py-2 font-medium">對象</th>
 								<th className="text-left px-3 py-2 font-medium">內容</th>
 								<th className="text-left px-3 py-2 font-medium">狀態</th>
@@ -125,7 +125,7 @@ export function PromptsPanel({ prompts, loading, onRefresh, onOpenConversation, 
 										</div>
 									</td>
 									<td className="px-3 py-2 whitespace-nowrap">
-										{p.allowChange && <span className="mr-1 text-[10px] text-neutral-400" title="允許更改，取最後一次">可改</span>}
+										{p.allowChange && <span className="mr-1 text-[10px] text-neutral-400" title="允許變更，以最後一次選擇為準">可變更</span>}
 										{p.status === "answered" ? (
 											<span
 												className={`px-1.5 py-0.5 rounded font-medium ${

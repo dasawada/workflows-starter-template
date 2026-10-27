@@ -48,7 +48,7 @@ export async function detectConflict(env: Env, input: OutboundInput): Promise<Se
 	if (conversation.assignedTo && conversation.assignedTo !== agentName) {
 		return {
 			code: "assigned",
-			error: `此對話目前由 ${conversation.assignedTo} 接手中`,
+			error: `此對話目前由 ${conversation.assignedTo} 負責`,
 			assignedTo: conversation.assignedTo,
 		};
 	}
@@ -57,7 +57,7 @@ export async function detectConflict(env: Env, input: OutboundInput): Promise<Se
 		if (newer.length) {
 			return {
 				code: "newer_reply",
-				error: `${newer[0].agentName ?? "另一位客服"} 在你之後已經回覆`,
+				error: `${newer[0].agentName ?? "其他客服人員"} 已於您之後回覆此對話`,
 				messages: newer,
 			};
 		}
@@ -75,7 +75,7 @@ export async function sendOutbound(env: Env, client: LineClient, input: Outbound
 		// 同一把 clientKey 已處理過（客服連點或前端逾時重送）：直接回既有結果，不再推一次
 		const conversation = (await getConversation(env.DB, existing.conversationId)) ?? input.conversation;
 		if (existing.deliveryStatus === "failed") {
-			return { kind: "failed", message: existing, conversation, error: String(existing.metadata?.deliveryError ?? "LINE 拒絕了這則訊息") };
+			return { kind: "failed", message: existing, conversation, error: String(existing.metadata?.deliveryError ?? "LINE 平台拒絕此訊息") };
 		}
 		return { kind: existing.deliveryStatus === "sent" ? "sent" : "pending", message: existing, conversation, reused: true };
 	}
@@ -102,7 +102,7 @@ export async function sendOutbound(env: Env, client: LineClient, input: Outbound
 	const message = await pushOutboundMessage(env, client, inserted.message, input.conversation.externalId);
 	const conversation = (await getConversation(env.DB, input.conversation.id)) ?? inserted.conversation;
 	if (message.deliveryStatus === "failed") {
-		return { kind: "failed", message, conversation, error: String(message.metadata?.deliveryError ?? "LINE 拒絕了這則訊息") };
+		return { kind: "failed", message, conversation, error: String(message.metadata?.deliveryError ?? "LINE 平台拒絕此訊息") };
 	}
 	return { kind: message.deliveryStatus === "sent" ? "sent" : "pending", message, conversation, reused: false };
 }
@@ -129,8 +129,8 @@ export async function pushOutboundMessage(
 			lineStatus: result.status,
 		});
 		if (message.deliveryStatus === "failed" || message.deliveryStatus === "unknown") {
-			await resolveIntegrity(env, `send_unknown:${message.id}`, "重推後 LINE 確認已送達");
-			await resolveIntegrity(env, `send_failed:${message.id}`, "重推後 LINE 確認已送達");
+			await resolveIntegrity(env, `send_unknown:${message.id}`, "重新推送後 LINE 確認已送達");
+			await resolveIntegrity(env, `send_failed:${message.id}`, "重新推送後 LINE 確認已送達");
 		}
 	} else if (result.transient) {
 		// 留在 pending，排程會再試
@@ -151,7 +151,7 @@ export async function pushOutboundMessage(
 			conversationId: message.conversationId,
 			messageId: message.id,
 			dedupeKey: `send_failed:${message.id}`,
-			title: "LINE 拒絕了客服訊息，使用者沒有收到",
+			title: "LINE 平台拒絕客服訊息，使用者未收到",
 			details: { status: result.status, error: result.error, text: message.text?.slice(0, 200) ?? null, agentName: message.agentName },
 			startedAt: message.createdAt,
 		});

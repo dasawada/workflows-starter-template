@@ -123,11 +123,11 @@ export async function refreshBotInfo(env: Env): Promise<LineBotInfo | null> {
 			kind: "chat_mode",
 			severity: "warning",
 			dedupeKey: "chat_mode:auto",
-			title: "官方帳號 Chat 已關閉：LINE 會自動標記已讀，客服台的已讀不會反映真人閱讀",
+			title: "官方帳號的 Chat 功能目前為關閉狀態。LINE 會自動將收到的訊息標記為已讀，此狀態不代表客服人員已實際閱讀。",
 			details: { chatMode: info.chatMode, markAsReadMode: info.markAsReadMode, previous: prevInfo?.markAsReadMode ?? null },
 		});
 	} else {
-		await resolveIntegrity(env, "chat_mode:auto", "Chat 已開啟，已讀改由客服台控制");
+		await resolveIntegrity(env, "chat_mode:auto", "Chat 功能已開啟，已讀狀態改由客服台控制");
 	}
 	return info;
 }
@@ -148,14 +148,14 @@ export async function runMaintenance(env: Env): Promise<{ outbound: number; medi
 		for (const message of await listPendingOutbound(env.DB, now - 60_000)) {
 			outbound++;
 			if (now - message.createdAt > RETRY_KEY_TTL_MS) {
-				await setDeliveryStatus(env.DB, message.id, "unknown", { error: "超過 24 小時仍未能確認送達結果" });
+				await setDeliveryStatus(env.DB, message.id, "unknown", { error: "超過 24 小時仍無法確認送達結果" });
 				await recordIntegrity(env, {
 					kind: "send_unknown",
 					severity: "error",
 					conversationId: message.conversationId,
 					messageId: message.id,
 					dedupeKey: `send_unknown:${message.id}`,
-					title: "客服訊息送達結果不明：LINE 可能已送出也可能沒有，請向使用者確認",
+					title: "客服訊息送達結果不明：無法確認 LINE 是否已發送，請向使用者確認",
 					details: { text: message.text?.slice(0, 200) ?? null, agentName: message.agentName },
 					startedAt: message.createdAt,
 				});

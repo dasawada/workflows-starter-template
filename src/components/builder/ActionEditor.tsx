@@ -4,10 +4,10 @@ import { newAction } from "../../builder/types";
 import { SelectField, SmallButton, TextField, Toggle } from "./fields";
 
 const KINDS: { value: ActionDraft["kind"]; label: string }[] = [
-	{ value: "postback", label: "選項（回到資料庫）" },
-	{ value: "datetimepicker", label: "選日期／時間（回到資料庫）" },
-	{ value: "message", label: "代使用者送一句話" },
-	{ value: "uri", label: "開網址" },
+	{ value: "postback", label: "選項（記錄至資料庫）" },
+	{ value: "datetimepicker", label: "選擇日期／時間（記錄至資料庫）" },
+	{ value: "message", label: "代使用者發送文字" },
+	{ value: "uri", label: "開啟網址" },
 ];
 
 interface Props {
@@ -39,7 +39,7 @@ export function ActionEditor({ action, index, labelMax = LIMITS.actionLabel, onC
 			</div>
 			<div className="grid grid-cols-2 gap-2">
 				<TextField label="按鈕文字" value={action.label} onChange={(v) => onChange({ ...action, label: v })} max={labelMax} required />
-				<SelectField label="按下後" value={action.kind} onChange={setKind} options={KINDS} />
+				<SelectField label="動作" value={action.kind} onChange={setKind} options={KINDS} />
 			</div>
 
 			{action.kind === "postback" && (
@@ -52,10 +52,10 @@ export function ActionEditor({ action, index, labelMax = LIMITS.actionLabel, onC
 							max={50}
 							required
 							placeholder="accept"
-							hint="寫進資料庫的代碼，英文或短字串"
+							hint="記錄至資料庫的代碼，建議使用英文或短字串"
 						/>
 						<TextField
-							label="聊天室顯示的話"
+							label="聊天室顯示文字"
 							value={action.displayText}
 							onChange={(v) => onChange({ ...action, displayText: v })}
 							max={LIMITS.displayText}
@@ -64,7 +64,7 @@ export function ActionEditor({ action, index, labelMax = LIMITS.actionLabel, onC
 						/>
 					</div>
 					<Toggle
-						label="按下後打開鍵盤，讓使用者補充文字"
+						label="按下後開啟鍵盤，供使用者補充文字"
 						checked={action.openKeyboard}
 						onChange={(v) => onChange({ ...action, openKeyboard: v })}
 					/>
@@ -84,7 +84,7 @@ export function ActionEditor({ action, index, labelMax = LIMITS.actionLabel, onC
 
 			{action.kind === "message" && (
 				<TextField
-					label="送出的文字"
+					label="發送的文字"
 					value={action.text}
 					onChange={(v) => onChange({ ...action, text: v })}
 					max={LIMITS.messageActionText}
@@ -109,7 +109,7 @@ export function ActionEditor({ action, index, labelMax = LIMITS.actionLabel, onC
 				<div className="grid grid-cols-2 gap-2">
 					<TextField label="選項值" value={action.value} onChange={(v) => onChange({ ...action, value: v })} max={50} required placeholder="reschedule" />
 					<SelectField
-						label="選什麼"
+						label="選擇類型"
 						value={action.mode}
 						onChange={(v) => onChange({ ...action, mode: v })}
 						options={[
@@ -119,14 +119,14 @@ export function ActionEditor({ action, index, labelMax = LIMITS.actionLabel, onC
 						]}
 					/>
 					<TextField
-						label="最早"
+						label="最早可選"
 						value={action.min}
 						onChange={(v) => onChange({ ...action, min: v })}
 						max={20}
 						type={action.mode === "date" ? "date" : action.mode === "time" ? "time" : "datetime-local"}
 					/>
 					<TextField
-						label="最晚"
+						label="最晚可選"
 						value={action.max}
 						onChange={(v) => onChange({ ...action, max: v })}
 						max={20}

@@ -73,8 +73,8 @@ describe("validateDraft", () => {
 		const errors = validateDraft({ messages: [carousel], quickReply: [] });
 		const text = errors.map((e) => e.message).join("\n");
 		expect(text).toContain("內文必填");
-		expect(text).toContain("按鈕數量必須一致");
-		expect(text).toContain("標題要全部的卡都有");
+		expect(text).toContain("按鈕數量須一致");
+		expect(text).toContain("標題須所有卡片皆提供");
 	});
 
 	it("accepts a complete confirm message", () => {

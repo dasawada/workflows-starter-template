@@ -166,7 +166,7 @@ async function handleEvent(
 			kind: "webhook_redelivery",
 			severity: "warning",
 			dedupeKey: `redelivery:${hour}`,
-			title: "LINE 重送了事件：這段期間接收端曾經失敗，重送不保證涵蓋所有事件",
+			title: "LINE 平台重送事件：該時段接收端曾發生失敗，重送機制不保證涵蓋所有事件",
 			details: { hour, lastEventType: event.type, lastWebhookEventId: event.webhookEventId ?? null },
 			startedAt: hour,
 			endedAt: event.timestamp || Date.now(),
@@ -392,7 +392,7 @@ async function handleMessage(
 			conversationId: target.conversationId,
 			messageId: inserted.message.id,
 			dedupeKey: `quote_missing:${inserted.message.id}`,
-			title: "使用者引用了一則本地沒有的訊息（可能在串接前，或來自未同步的來源）",
+			title: "使用者引用的訊息不存在於本系統（可能發送於串接之前，或來自未同步的來源）",
 			details: { quotedMessageId: (metadata.quote as MessageQuote).externalId, text: text?.slice(0, 200) ?? null },
 			startedAt: now,
 		});
@@ -530,10 +530,10 @@ async function handlePostback(
 
 	if (event.replyToken) {
 		const text = !applied
-			? `您已於 ${formatTime(prompt.respondedAt ?? now)} 回覆「${prompt.choiceLabel ?? prompt.choice}」，此題以第一次回覆為準。如需更改，請直接留言告訴我們。`
+			? `您已於 ${formatTime(prompt.respondedAt ?? now)} 回覆「${prompt.choiceLabel ?? prompt.choice}」，本題以第一次回覆為準。如需更改，請直接留言告知。`
 			: result.alreadyAnswered
 				? `已更新您的選擇為「${label}」。`
-				: `已收到您的選擇「${label}」，謝謝！`;
+				: `已收到您的選擇「${label}」，謝謝。`;
 		try {
 			await client.reply(event.replyToken, [{ type: "text", text }]);
 			await insertMessage(env.DB, {
@@ -603,7 +603,7 @@ async function handleFollow(
 	await ensureConversation(target, event.source, env, client, now);
 	await recordSystemMessage(
 		target.conversationId,
-		event.type === "follow" ? "使用者加入好友" : "官方帳號被加入群組",
+		event.type === "follow" ? "使用者加入好友" : "官方帳號已加入群組",
 		now,
 		env,
 		target,
