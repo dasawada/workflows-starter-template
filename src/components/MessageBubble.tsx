@@ -74,6 +74,56 @@ export function MessageBubble({ message, onRetry, onReport }: Props) {
 }
 
 /**
+ * 圖集：使用者一次傳多張圖片時，LINE 會把它們收在同一則裡顯示成格子。
+ * webhook 其實是一張一個事件（帶同一個 imageSet.id），這裡依 index 排序後收斂成一個泡泡，
+ * 一個時間、一個驚嘆號（回報第一張，上下文會涵蓋整組）。
+ */
+export function ImageSetBubble({
+	messages,
+	onReport,
+}: {
+	messages: Message[];
+	onReport?: (messageId: string, note?: string) => Promise<void>;
+}) {
+	const sorted = [...messages].sort(
+		(a, b) => Number((a.metadata?.imageSet as { index: number })?.index ?? 0) - Number((b.metadata?.imageSet as { index: number })?.index ?? 0),
+	);
+	const first = sorted[0];
+	const total = Number((first.metadata?.imageSet as { total?: number })?.total ?? sorted.length);
+	const senderName = (first.metadata?.senderName as string | undefined) ?? (first.metadata?.senderUserId as string | undefined);
+	const reported = sorted.some((m) => typeof m.metadata?.reportedAt === "number");
+	const cols = sorted.length <= 2 ? sorted.length : 3;
+
+	return (
+		<div className="group flex items-end gap-1 justify-start my-1">
+			<div className="max-w-[75%] flex flex-col items-start">
+				{senderName && <span className="text-[11px] text-neutral-500 mb-0.5 px-1">{senderName}</span>}
+				<div className="rounded-2xl rounded-bl-md overflow-hidden bg-white dark:bg-neutral-800 ring-glass p-1">
+					<div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, width: cols * 112 }}>
+						{sorted.map((m) => {
+							const src = m.mediaKey ? api.mediaUrl(m.mediaKey) : (m.metadata?.externalUrl as string | undefined);
+							return src ? (
+								<a key={m.id} href={src} target="_blank" rel="noreferrer" className="block aspect-square overflow-hidden rounded-md bg-neutral-100 dark:bg-neutral-700">
+									<img src={src} alt="圖片" className="w-full h-full object-cover" loading="lazy" />
+								</a>
+							) : (
+								<div key={m.id} className="aspect-square rounded-md bg-neutral-100 dark:bg-neutral-700 flex items-center justify-center text-[10px] text-neutral-400 px-1 text-center">
+									{m.mediaStatus === "expired" ? "已逾期" : m.mediaStatus === "failed" ? "下載失敗" : "下載中"}
+								</div>
+							);
+						})}
+					</div>
+				</div>
+				<span className="text-[10px] text-neutral-400 mt-0.5 px-1 flex items-center gap-1">
+					{formatTime(first.createdAt)} · {sorted.length < total ? `${sorted.length}/${total} 張` : `${total} 張圖片`}
+				</span>
+			</div>
+			{onReport && <ReportButton messageId={first.id} reported={reported} onReport={onReport} />}
+		</div>
+	);
+}
+
+/**
  * 驚嘆號：客服覺得這則訊息有問題，按一下即回報，不開任何浮層、不要求說明。
  * 回報後改顯示「已回報」。上下文由伺服器收齊，工程端每天用 npm run reports 讀取。
  */

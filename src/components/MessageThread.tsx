@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import type { Conversation, Message } from "../../shared/types";
 import { formatDateHeading } from "../format";
 import { Avatar } from "./Avatar";
-import { MessageBubble } from "./MessageBubble";
+import { ImageSetBubble, MessageBubble } from "./MessageBubble";
 import { Composer } from "./Composer";
 
 interface Props {
@@ -68,6 +68,16 @@ export function MessageThread({
 	const mine = !!agentName && conversation.assignedTo === agentName;
 	const otherViewers = viewers.filter((v) => v !== agentName);
 
+	// 同一個圖集（imageSet.id）的圖片收斂成一個泡泡，放在第一張出現的位置
+	const imageSets = new Map<string, Message[]>();
+	for (const m of messages) {
+		const setId = (m.metadata?.imageSet as { id?: string } | undefined)?.id;
+		if (setId && m.direction === "inbound" && !m.unsentAt) {
+			imageSets.set(setId, [...(imageSets.get(setId) ?? []), m]);
+		}
+	}
+	const renderedSets = new Set<string>();
+
 	const items: ReactNode[] = [];
 	let lastDay = "";
 	for (const m of messages) {
@@ -81,6 +91,13 @@ export function MessageThread({
 				</div>,
 			);
 			lastDay = day;
+		}
+		const setId = (m.metadata?.imageSet as { id?: string } | undefined)?.id;
+		if (setId && imageSets.has(setId)) {
+			if (renderedSets.has(setId)) continue;
+			renderedSets.add(setId);
+			items.push(<ImageSetBubble key={`set-${setId}`} messages={imageSets.get(setId)!} onReport={onReportMessage} />);
+			continue;
 		}
 		items.push(<MessageBubble key={m.id} message={m} onRetry={onRetryMessage} onReport={onReportMessage} />);
 	}
