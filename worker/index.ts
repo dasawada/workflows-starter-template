@@ -568,7 +568,8 @@ async function sendTracked(
 	if (!env.LINE_CHANNEL_ACCESS_TOKEN) return Response.json({ error: "LINE_CHANNEL_ACCESS_TOKEN not configured" }, { status: 500 });
 
 	const promptId = crypto.randomUUID();
-	const { messages, options } = instrumentPostbacks(input.messages, promptId);
+	const { messages, options, tooLong } = instrumentPostbacks(input.messages, promptId);
+	if (tooLong) return Response.json({ error: "字數超出上限" }, { status: 400 });
 	const tracked = options.length > 0;
 	const { body, question } = summarizeMessages(messages);
 

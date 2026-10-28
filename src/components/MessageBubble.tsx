@@ -15,7 +15,7 @@ interface Props {
 }
 
 /** LINE 有給 quoteToken 且未撤回的訊息才能被引用 */
-export function canQuote(message: Message): boolean {
+function canQuote(message: Message): boolean {
 	return typeof message.metadata?.quoteToken === "string" && !message.unsentAt && message.sender !== "system";
 }
 

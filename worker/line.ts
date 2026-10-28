@@ -201,6 +201,7 @@ const ALLOWED_MESSAGE_TYPES = new Set([
 	"flex",
 ]);
 export const MAX_MESSAGES_PER_PUSH = 5;
+/** LINE postback data 的上限（字元）；改寫成追蹤格式後才檢查，因為中文經網址編碼後一字占 9 字元 */
 export const POSTBACK_DATA_MAX = 300;
 
 type Json = Record<string, unknown>;
@@ -224,14 +225,16 @@ export function validateLineMessages(raw: unknown): { ok: true; messages: Json[]
  * 走訪訊息內所有 postback action，把 data 改寫成 prompt=<id>&choice=<value>。
  * value 取原本的 data（若有）否則取 label / displayText；回傳可供追蹤的選項清單。
  * 同一個 value 出現多次（例如 carousel 每張卡都有「承接」）會合併成一個選項。
+ * 改寫後任何一個 data 超過 POSTBACK_DATA_MAX 時 tooLong = true，LINE 會拒收整批訊息，呼叫端應在送出前擋下。
  */
 export function instrumentPostbacks(
 	messages: Json[],
 	promptId: string,
-): { messages: Json[]; options: { label: string; value: string }[] } {
+): { messages: Json[]; options: { label: string; value: string }[]; tooLong: boolean } {
 	const options: { label: string; value: string }[] = [];
 	const seen = new Set<string>();
 	let counter = 0;
+	let tooLong = false;
 
 	const visit = (node: unknown): unknown => {
 		if (Array.isArray(node)) return node.map(visit);
@@ -254,11 +257,12 @@ export function instrumentPostbacks(
 				options.push({ label: label.slice(0, 20), value });
 			}
 			out.data = new URLSearchParams({ prompt: promptId, choice: value }).toString();
+			if ((out.data as string).length > POSTBACK_DATA_MAX) tooLong = true;
 		}
 		return out;
 	};
 
-	return { messages: visit(messages) as Json[], options };
+	return { messages: visit(messages) as Json[], options, tooLong };
 }
 
 /** 從訊息陣列取一段摘要文字，給對話清單與追蹤面板顯示 */

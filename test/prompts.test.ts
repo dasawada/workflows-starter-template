@@ -398,4 +398,35 @@ describe("POST /api/conversations/:id/send (raw LINE messages)", () => {
 			expect(res.status, JSON.stringify(body)).toBe(400);
 		}
 	});
+
+	it("rejects postback data that exceeds LINE's limit after tracking is added, without pushing", async () => {
+		await seedUser("U-long", "長選項");
+		// 中文經網址編碼後一字占 9 字元：40 字的選項值改寫後必定超過 300 字元
+		const res = await SELF.fetch("https://console.test/api/conversations/line%3AU-long/send", {
+			method: "POST",
+			headers: { ...AUTH, "Content-Type": "application/json" },
+			body: JSON.stringify({
+				messages: [
+					{
+						type: "template",
+						altText: "Q",
+						template: {
+							type: "confirm",
+							text: "Q",
+							actions: [
+								{ type: "postback", label: "是", data: "承".repeat(40) },
+								{ type: "postback", label: "否", data: "no" },
+							],
+						},
+					},
+				],
+			}),
+		});
+		expect(res.status).toBe(400);
+		expect(((await res.json()) as { error: string }).error).toBe("字數超出上限");
+		const stored = await env.DB.prepare("SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND direction = 'outbound'")
+			.bind("line:U-long")
+			.first<{ n: number }>();
+		expect(stored?.n).toBe(0);
+	});
 });

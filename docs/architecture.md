@@ -106,7 +106,7 @@ src/components/            呈現層
 ### 互動訊息
 
 - 編輯台（`src/builder/`）只產生五種受控版型：text、confirm、buttons、carousel、固定版面的 Flex 資訊卡。`limits.ts` 是 LINE 上限的唯一來源，`toLine.ts` 的輸出必定合法。JSON 模式留給進階使用者，最終由 LINE API 驗證。
-- 送出時 `instrumentPostbacks` 把每個 postback 改寫成 `prompt=<id>&choice=<原值>`；有 postback 才建 `prompts` 紀錄。
+- 送出時 `instrumentPostbacks` 把每個 postback 改寫成 `prompt=<id>&choice=<原值>`；有 postback 才建 `prompts` 紀錄。改寫後超過 LINE 的 300 字元上限就在送出前回 400「字數超出上限」，不讓 LINE 的拒收變成客服看不懂的發送失敗。
 - 使用者點選後回到 webhook 的 `handlePostback`：每次都寫 `prompt_responses`，但只有第一次（或 `allow_change = 1`）更新結果；LINE 的按鈕永遠可按，這是在資料層定義的規則。
 
 ### 逾時提醒
