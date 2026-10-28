@@ -251,8 +251,8 @@ async function defaultAccountName(env: Env): Promise<string | null> {
 
 export async function previewImport(env: Env, csv: string, mappingOverride?: ImportMapping, tzOffsetMinutes = 480): Promise<ImportPreview | { error: string }> {
 	const { delimiter, rows } = parseCsv(csv);
-	if (rows.length < 2) return { error: "CSV 至少需包含標題列與一列資料" };
-	if (rows.length - 1 > MAX_IMPORT_ROWS) return { error: `單次最多匯入 ${MAX_IMPORT_ROWS} 列，請分割檔案` };
+	if (rows.length < 2) return { error: "CSV 至少需包含標題列與一列資料。" };
+	if (rows.length - 1 > MAX_IMPORT_ROWS) return { error: `單次最多匯入 ${MAX_IMPORT_ROWS} 列。請將檔案分割後再匯入。` };
 	const headers = rows[0];
 	const mapping = { ...detectMapping(headers), ...(mappingOverride ?? {}) };
 	const missing = missingColumns(mapping);
@@ -290,11 +290,11 @@ export async function previewImport(env: Env, csv: string, mappingOverride?: Imp
 export async function runImport(env: Env, input: ImportRunInput, createdBy: string | null): Promise<ImportBatch | { error: string }> {
 	const tz = input.tzOffsetMinutes ?? 480;
 	const { rows } = parseCsv(input.csv);
-	if (rows.length < 2) return { error: "CSV 至少需包含標題列與一列資料" };
-	if (rows.length - 1 > MAX_IMPORT_ROWS) return { error: `單次最多匯入 ${MAX_IMPORT_ROWS} 列，請分割檔案` };
+	if (rows.length < 2) return { error: "CSV 至少需包含標題列與一列資料。" };
+	if (rows.length - 1 > MAX_IMPORT_ROWS) return { error: `單次最多匯入 ${MAX_IMPORT_ROWS} 列。請將檔案分割後再匯入。` };
 	const mapping = { ...detectMapping(rows[0]), ...(input.mapping ?? {}) };
 	const missing = missingColumns(mapping);
-	if (missing.length) return { error: `缺少欄位對應：${missing.join("、")}` };
+	if (missing.length) return { error: `缺少欄位對應：${missing.join("、")}。請指定對應的欄位。` };
 
 	const accountName = input.accountName?.trim() || (await defaultAccountName(env));
 	const parsed = parseRows(rows.slice(1), mapping, tz);
@@ -361,13 +361,13 @@ export async function runImport(env: Env, input: ImportRunInput, createdBy: stri
 		kind: "import",
 		severity: unmatched > 0 ? "warning" : "info",
 		dedupeKey: `import:${batchId}`,
-		title: unmatched > 0 ? `匯入完成，其中 ${unmatched} 列查無對應對話，需人工指派` : `匯入完成：寫入 ${inserted} 則，略過重複 ${duplicates} 則`,
+		title: unmatched > 0 ? `匯入完成。其中 ${unmatched} 列查無對應的對話，請以人工指派。` : `匯入完成：寫入 ${inserted} 則，略過重複的 ${duplicates} 則。`,
 		details: { batchId, fileName: input.fileName ?? null, inserted, duplicates, unmatched, invalidRows },
 		startedAt: batch.rangeStart,
 		endedAt: batch.rangeEnd,
 		createdBy,
 	});
-	if (unmatched === 0) await resolveIntegrity(env, `import:${batchId}`, "已全部配對完成");
+	if (unmatched === 0) await resolveIntegrity(env, `import:${batchId}`, "已全部配對完成。");
 	return batch;
 }
 
@@ -413,7 +413,7 @@ export async function assignImportRows(
 	conversationId: string,
 ): Promise<{ inserted: number; duplicates: number } | { error: string }> {
 	const rows = await listUnmatchedImportRows(env.DB, batchId, chatName);
-	if (!rows.length) return { error: "沒有待指派的紀錄" };
+	if (!rows.length) return { error: "沒有待指派的紀錄。" };
 	const group = rows.map((r) => ({ chat: r.chatName, sender: r.sender, text: r.text, type: null, sentAt: r.sentAt }));
 	// 方向在存入 import_rows 時已算好，這裡沿用
 	const start = Math.min(...rows.map((r) => r.sentAt));
@@ -442,7 +442,7 @@ export async function assignImportRows(
 	duplicates += toInsert.length - inserted;
 	await markImportRows(env.DB, batchId, chatName, "assigned", conversationId);
 	const batch = await bumpImportBatch(env.DB, batchId, { inserted, duplicates, unmatched: -rows.length, skipped: 0 });
-	if (batch && batch.unmatched <= 0) await resolveIntegrity(env, `import:${batchId}`, "已全部配對完成");
+	if (batch && batch.unmatched <= 0) await resolveIntegrity(env, `import:${batchId}`, "已全部配對完成。");
 	return { inserted, duplicates };
 }
 
@@ -450,7 +450,7 @@ export async function skipImportRows(env: Env, batchId: string, chatName: string
 	const changed = await markImportRows(env.DB, batchId, chatName, "skipped", null);
 	if (changed) {
 		const batch = await bumpImportBatch(env.DB, batchId, { inserted: 0, duplicates: 0, unmatched: -changed, skipped: changed });
-		if (batch && batch.unmatched <= 0) await resolveIntegrity(env, `import:${batchId}`, "其餘未配對紀錄已標記為略過");
+		if (batch && batch.unmatched <= 0) await resolveIntegrity(env, `import:${batchId}`, "其餘未配對的紀錄已標記為略過。");
 	}
 	return changed;
 }

@@ -69,7 +69,7 @@ import type {
  * - POST /api/conversations/:id/assign      接手 { agent? }；/release 交還
  * - GET  /api/conversations/:id/presence    正在看這個對話的客服
  * - POST /api/messages/:id/report           客服對某則訊息按驚嘆號 { note? }；系統自動收齊上下文供工程端判讀
- * - POST /api/messages/:id/retry            重推送出失敗／不明的客服訊息
+ * - POST /api/messages/:id/retry            重推發送失敗／不明的客服訊息
  * - GET  /api/prompts?status=&conversationId= 可追蹤訊息與回覆結果
  * - POST /api/conversations/:id/read        清除未讀（並通知 LINE 已讀）
  * - POST /api/conversations/:id/status      { status: "open" | "closed" }
@@ -222,7 +222,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 	if (resolveMatch && request.method === "POST") {
 		const body = await readJson<{ resolution?: string }>(request);
 		const event = await resolveIntegrityEvent(env.DB, resolveMatch[1], body.resolution?.trim() || null, agentNameOf(request));
-		if (!event) return Response.json({ error: "Not found" }, { status: 404 });
+		if (!event) return Response.json({ error: "找不到此筆紀錄。" }, { status: 404 });
 		return Response.json({ event });
 	}
 	if (pathname === "/api/integrity/maintenance" && request.method === "POST") {
@@ -232,14 +232,14 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 	// ---------- 歷史匯入 ----------
 	if (pathname === "/api/imports/preview" && request.method === "POST") {
 		const body = await readJson<{ csv?: string; mapping?: ImportMapping; tzOffsetMinutes?: number }>(request);
-		if (typeof body.csv !== "string" || !body.csv.trim()) return Response.json({ error: "csv is required" }, { status: 400 });
+		if (typeof body.csv !== "string" || !body.csv.trim()) return Response.json({ error: "未提供 CSV 內容。請選擇檔案或貼上內容。" }, { status: 400 });
 		const preview = await previewImport(env, body.csv, body.mapping, body.tzOffsetMinutes);
 		if ("error" in preview) return Response.json(preview, { status: 400 });
 		return Response.json(preview);
 	}
 	if (pathname === "/api/imports" && request.method === "POST") {
 		const body = await readJson<ImportRunInput>(request);
-		if (typeof body.csv !== "string" || !body.csv.trim()) return Response.json({ error: "csv is required" }, { status: 400 });
+		if (typeof body.csv !== "string" || !body.csv.trim()) return Response.json({ error: "未提供 CSV 內容。請選擇檔案或貼上內容。" }, { status: 400 });
 		const batch = await runImport(env, body as ImportRunInput, agentNameOf(request));
 		if ("error" in batch) return Response.json(batch, { status: 400 });
 		return Response.json({ batch });
@@ -251,17 +251,17 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 	if (importMatch) {
 		const batchId = importMatch[1];
 		const batch = await getImportBatch(env.DB, batchId);
-		if (!batch) return Response.json({ error: "Not found" }, { status: 404 });
+		if (!batch) return Response.json({ error: "找不到此匯入批次。請重新整理頁面後再試。" }, { status: 404 });
 		if (importMatch[2] === "rows" && request.method === "GET") {
 			return Response.json({ batch, groups: await listImportRowGroups(env.DB, batchId) });
 		}
 		if (importMatch[2] === "assign" && request.method === "POST") {
 			const body = await readJson<{ chatName?: string; conversationId?: string }>(request);
 			if (typeof body.chatName !== "string" || !body.conversationId) {
-				return Response.json({ error: "chatName and conversationId are required" }, { status: 400 });
+				return Response.json({ error: "未指定聊天室名稱或對話。請選擇要指派的對話。" }, { status: 400 });
 			}
 			if (!(await getConversation(env.DB, body.conversationId))) {
-				return Response.json({ error: "Conversation not found" }, { status: 404 });
+				return Response.json({ error: "找不到此對話。請重新整理頁面後再試。" }, { status: 404 });
 			}
 			const result = await assignImportRows(env, batchId, body.chatName, body.conversationId);
 			if ("error" in result) return Response.json(result, { status: 400 });
@@ -269,7 +269,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 		}
 		if (importMatch[2] === "skip" && request.method === "POST") {
 			const body = await readJson<{ chatName?: string }>(request);
-			if (typeof body.chatName !== "string") return Response.json({ error: "chatName is required" }, { status: 400 });
+			if (typeof body.chatName !== "string") return Response.json({ error: "未指定聊天室名稱。" }, { status: 400 });
 			const skipped = await skipImportRows(env, batchId, body.chatName);
 			return Response.json({ skipped, batch: await getImportBatch(env.DB, batchId) });
 		}
@@ -280,7 +280,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 		return Response.json({ notifications: await listNotifications(env.DB, Number(url.searchParams.get("limit")) || 100) });
 	}
 	if (pathname === "/api/notifications" && request.method === "POST") {
-		if (!env.LINE_CHANNEL_ACCESS_TOKEN) return Response.json({ error: "LINE_CHANNEL_ACCESS_TOKEN not configured" }, { status: 500 });
+		if (!env.LINE_CHANNEL_ACCESS_TOKEN) return Response.json({ error: "尚未設定 LINE_CHANNEL_ACCESS_TOKEN，無法發送訊息。請聯絡系統管理員。" }, { status: 500 });
 		const body = await readJson<SendNotificationInput>(request);
 		const result = await sendNotification(env, lineClientFor(env), body as SendNotificationInput, "console", agentNameOf(request));
 		if ("httpStatus" in result) return Response.json({ error: result.error }, { status: result.httpStatus });
@@ -297,7 +297,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 	const reportMatch = pathname.match(/^\/api\/messages\/([^/]+)\/report$/);
 	if (reportMatch && request.method === "POST") {
 		const message = await getMessage(env.DB, reportMatch[1]);
-		if (!message) return Response.json({ error: "Not found" }, { status: 404 });
+		if (!message) return Response.json({ error: "找不到此訊息。請重新整理頁面後再試。" }, { status: 404 });
 		const body = await readJson<{ note?: string }>(request);
 		const note = body.note?.trim().slice(0, 500) || null;
 		const now = Date.now();
@@ -350,7 +350,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 	if (retryMatch && request.method === "POST") {
 		const message = await getMessage(env.DB, retryMatch[1]);
 		if (!message || message.direction !== "outbound" || message.sender !== "agent") {
-			return Response.json({ error: "Not found" }, { status: 404 });
+			return Response.json({ error: "找不到可重新發送的訊息。請重新整理頁面後再試。" }, { status: 404 });
 		}
 		if (message.deliveryStatus === "sent") return Response.json({ message });
 		const updated = await pushOutboundMessage(env, lineClientFor(env), message);
@@ -365,7 +365,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 		const action = convMatch[2];
 		const conversation = await getConversation(env.DB, conversationId);
 		if (!conversation) {
-			return Response.json({ error: "Conversation not found" }, { status: 404 });
+			return Response.json({ error: "找不到此對話。請重新整理頁面後再試。" }, { status: 404 });
 		}
 
 		if (action === "messages" && request.method === "GET") {
@@ -390,7 +390,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 		if (action === "status" && request.method === "POST") {
 			const body = await readJson<{ status?: string }>(request);
 			if (body.status !== "open" && body.status !== "closed") {
-				return Response.json({ error: "status must be open|closed" }, { status: 400 });
+				return Response.json({ error: "對話狀態只能是 open 或 closed。" }, { status: 400 });
 			}
 			const updated = await setConversationStatus(env.DB, conversationId, body.status);
 			if (updated) await inboxStub(env).broadcast({ type: "conversation.updated", conversation: updated });
@@ -400,16 +400,16 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 		if ((action === "assign" || action === "release") && request.method === "POST") {
 			const body = await readJson<{ agent?: string }>(request);
 			const agent = action === "assign" ? (body.agent?.trim().slice(0, 40) || agentNameOf(request)) : null;
-			if (action === "assign" && !agent) return Response.json({ error: "請提供客服名稱" }, { status: 400 });
+			if (action === "assign" && !agent) return Response.json({ error: "缺少客服名稱。請登出後重新登入並輸入名稱。" }, { status: 400 });
 			const previous = conversation.assignedTo;
 			const updated = await assignConversation(env.DB, conversationId, agent);
-			if (!updated) return Response.json({ error: "Conversation not found" }, { status: 404 });
+			if (!updated) return Response.json({ error: "找不到此對話。請重新整理頁面後再試。" }, { status: 404 });
 			const note =
 				action === "assign"
 					? previous && previous !== agent
-						? `${agent} 已接手此對話（原負責人：${previous}）`
-						: `${agent} 已接手此對話`
-					: `${previous ?? agentNameOf(request) ?? "客服人員"} 已交還此對話`;
+						? `「${agent}」已接手此對話（原負責人：${previous}）`
+						: `「${agent}」已接手此對話`
+					: `「${previous ?? agentNameOf(request) ?? "客服人員"}」已交還此對話`;
 			const inserted = await insertMessage(env.DB, {
 				id: crypto.randomUUID(),
 				conversationId,
@@ -453,7 +453,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 		return new Response(object.body, { headers });
 	}
 
-	return Response.json({ error: "Not Found" }, { status: 404 });
+	return Response.json({ error: "找不到此 API 路徑。" }, { status: 404 });
 }
 
 /** 呼叫 LINE 已讀 API；成功才清掉 token，失敗只記 log 不影響客服台 */
@@ -491,22 +491,22 @@ function outboundResponse(result: Awaited<ReturnType<typeof sendOutbound>>, extr
 async function handleReply(request: Request, env: Env, conversation: Conversation): Promise<Response> {
 	const body = await readJson<ReplyInput>(request);
 	const text = body.text?.trim();
-	if (!text) return Response.json({ error: "text is required" }, { status: 400 });
-	if (text.length > TEXT_MESSAGE_MAX) return Response.json({ error: "text too long (max 5000)" }, { status: 400 });
-	if (conversation.channel !== "line") return Response.json({ error: `channel ${conversation.channel} not supported yet` }, { status: 400 });
-	if (!env.LINE_CHANNEL_ACCESS_TOKEN) return Response.json({ error: "LINE_CHANNEL_ACCESS_TOKEN not configured" }, { status: 500 });
+	if (!text) return Response.json({ error: "請輸入訊息內容。" }, { status: 400 });
+	if (text.length > TEXT_MESSAGE_MAX) return Response.json({ error: `訊息超過 ${TEXT_MESSAGE_MAX} 字的上限。請縮短後再發送。` }, { status: 400 });
+	if (conversation.channel !== "line") return Response.json({ error: `此對話的渠道（${conversation.channel}）尚未支援發送訊息。` }, { status: 400 });
+	if (!env.LINE_CHANNEL_ACCESS_TOKEN) return Response.json({ error: "尚未設定 LINE_CHANNEL_ACCESS_TOKEN，無法發送訊息。請聯絡系統管理員。" }, { status: 500 });
 
-	// 引用：LINE 只讓文字與貼圖帶 quoteToken；token 來自使用者訊息的 webhook 或我方送出時的 sentMessages
+	// 引用：LINE 只讓文字與貼圖帶 quoteToken；token 來自使用者訊息的 webhook 或我方發送時的 sentMessages
 	let quote: Record<string, unknown> | null = null;
 	let quoteToken: string | null = null;
 	if (body.quoteMessageId) {
 		const target = await getMessage(env.DB, body.quoteMessageId);
 		if (!target || target.conversationId !== conversation.id) {
-			return Response.json({ error: "找不到要引用的訊息" }, { status: 400 });
+			return Response.json({ error: "找不到要引用的訊息。請重新整理頁面後再試。" }, { status: 400 });
 		}
 		quoteToken = typeof target.metadata?.quoteToken === "string" ? target.metadata.quoteToken : null;
 		if (!quoteToken || target.unsentAt) {
-			return Response.json({ error: "此訊息無法引用（LINE 未提供引用憑證，或訊息已撤回）" }, { status: 400 });
+			return Response.json({ error: "此訊息無法引用。LINE 未提供引用憑證，或訊息已撤回。" }, { status: 400 });
 		}
 		quote = { externalId: target.externalId, messageId: target.id, text: target.text, type: target.type, sender: target.sender };
 	}
@@ -537,7 +537,7 @@ async function finishReminder(env: Env, conversationId: string): Promise<void> {
 }
 
 /**
- * 直接送 LINE 訊息陣列（Flex、template、quick reply…）。
+ * 直接送 LINE 訊息陣列（Flex、template、quick reply 等）。
  * 任何 postback 按鈕都會自動掛上追蹤 id，使用者點選後寫回 prompts。
  */
 async function handleSendMessages(request: Request, env: Env, conversation: Conversation): Promise<Response> {
@@ -553,7 +553,7 @@ async function handleSendMessages(request: Request, env: Env, conversation: Conv
 }
 
 /**
- * 共用：改寫 postback → 走 outbox 送出 → 有 postback 才建立 prompts，再廣播。
+ * 共用：改寫 postback → 走 outbox 發送 → 有 postback 才建立 prompts，再廣播。
  */
 async function sendTracked(
 	env: Env,
@@ -564,12 +564,12 @@ async function sendTracked(
 		allowChange?: boolean;
 	} & Pick<OutboundInput, "agentName" | "clientKey" | "lastSeenMessageId" | "force">,
 ): Promise<Response> {
-	if (conversation.channel !== "line") return Response.json({ error: `channel ${conversation.channel} not supported yet` }, { status: 400 });
-	if (!env.LINE_CHANNEL_ACCESS_TOKEN) return Response.json({ error: "LINE_CHANNEL_ACCESS_TOKEN not configured" }, { status: 500 });
+	if (conversation.channel !== "line") return Response.json({ error: `此對話的渠道（${conversation.channel}）尚未支援發送訊息。` }, { status: 400 });
+	if (!env.LINE_CHANNEL_ACCESS_TOKEN) return Response.json({ error: "尚未設定 LINE_CHANNEL_ACCESS_TOKEN，無法發送訊息。請聯絡系統管理員。" }, { status: 500 });
 
 	const promptId = crypto.randomUUID();
 	const { messages, options, tooLong } = instrumentPostbacks(input.messages, promptId);
-	if (tooLong) return Response.json({ error: "字數超出上限" }, { status: 400 });
+	if (tooLong) return Response.json({ error: "字數超出上限。" }, { status: 400 });
 	const tracked = options.length > 0;
 	const { body, question } = summarizeMessages(messages);
 

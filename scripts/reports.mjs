@@ -66,7 +66,7 @@ for (const r of rows) {
 	console.log("=".repeat(100));
 	console.log(`[${r.kind}] ${r.severity} ${r.status}  id=${r.id}`);
 	console.log(`${r.title}`);
-	console.log(`時間 ${fmt(r.created_at)}  對話 ${r.display_name ?? "-"} (${r.conversation_id ?? "-"})  訊息 ${r.message_id ?? "-"}  回報者 ${r.created_by ?? "-"}  次數 ${details?.count ?? 1}`);
+	console.log(`時間 ${fmt(r.created_at)}  對話 ${r.display_name ?? "-"}  對話 ID ${r.conversation_id ?? "-"}  訊息 ${r.message_id ?? "-"}  回報者 ${r.created_by ?? "-"}  次數 ${details?.count ?? 1}`);
 	if (r.resolution) console.log(`處理結果：${r.resolution}（${fmt(r.resolved_at)}）`);
 	if (details?.context) {
 		console.log("--- 上下文（> 為被回報的那則）");
@@ -84,4 +84,5 @@ for (const r of rows) {
 	}
 }
 console.log("=".repeat(100));
+// copy-lint-disable-next-line（指令範例中的雙引號是 shell 語法）
 console.log(`共 ${rows.length} 筆。結案：npm run reports -- --resolve <id> "處理說明"`);

@@ -34,7 +34,7 @@ export function LinePreview({ messages, compact = false }: Props) {
 }
 
 function Invalid({ text }: { text: string }) {
-	return <div className="text-[11px] text-red-600">⚠ {text}</div>;
+	return <div className="text-[11px] text-red-600">{text}</div>;
 }
 
 function Card({ children, compact }: { children: ReactNode; compact?: boolean }) {
@@ -58,11 +58,11 @@ function MessageView({ message, compact }: { message: Json; compact: boolean }) 
 				</Card>
 			);
 		case "sticker":
-			return <Card compact={compact}><div className="px-3 py-2 text-xs">🙂 貼圖 {str(message.packageId)}/{str(message.stickerId)}</div></Card>;
+			return <Card compact={compact}><div className="px-3 py-2 text-xs">貼圖 {str(message.packageId)}/{str(message.stickerId)}</div></Card>;
 		case "image":
 			return <Card compact={compact}><img src={str(message.previewImageUrl) || str(message.originalContentUrl)} alt="" className="max-w-full" /></Card>;
 		case "location":
-			return <Card compact={compact}><div className="px-3 py-2 text-xs">📍 {str(message.title)}<br />{str(message.address)}</div></Card>;
+			return <Card compact={compact}><div className="px-3 py-2 text-xs">位置：{str(message.title)}<br />{str(message.address)}</div></Card>;
 		case "template":
 			return <TemplateView message={message} compact={compact} />;
 		case "flex":
@@ -78,11 +78,12 @@ function ActionButton({ action, divider }: { action: unknown; divider?: boolean 
 	const a = obj(action);
 	const label = str(a?.label, "（按鈕）");
 	const kind = str(a?.type);
-	const tag = kind === "postback" ? "" : kind === "uri" ? " ↗" : kind === "datetimepicker" ? " 📅" : kind === "message" ? " 💬" : "";
+	// LINE 的按鈕外觀不分類型；類型放在滑過提示，不另加圖示
+	const kindLabel =
+		kind === "postback" ? "回傳選擇" : kind === "uri" ? "開啟網址" : kind === "datetimepicker" ? "選擇日期時間" : kind === "message" ? "以使用者身分發送文字" : undefined;
 	return (
-		<div className={`py-2 text-center text-xs text-sky-600 font-medium ${divider ? "border-t border-neutral-200" : ""}`}>
+		<div title={kindLabel} className={`py-2 text-center text-xs text-sky-600 font-medium ${divider ? "border-t border-neutral-200" : ""}`}>
 			{label}
-			{tag}
 		</div>
 	);
 }
@@ -301,7 +302,7 @@ function QuickReplyView({ quickReply }: { quickReply: Json }) {
 				const a = obj(obj(it)?.action);
 				return (
 					<span key={i} className="text-[11px] px-2.5 py-1 rounded-full bg-white text-neutral-800 ring-1 ring-neutral-300">
-						{str(a?.label, "（鈕）")}
+						{str(a?.label, "（按鈕）")}
 					</span>
 				);
 			})}

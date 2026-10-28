@@ -129,7 +129,7 @@ export function MessageThread({
 						<span>LINE · {conversation.externalId}</span>
 						{conversation.assignedTo && (
 							<span className="px-1.5 rounded bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-300">
-								{mine ? "由您負責" : `由 ${conversation.assignedTo} 負責`}
+								{mine ? "由您負責" : `由「${conversation.assignedTo}」負責`}
 							</span>
 						)}
 						{otherViewers.length > 0 && (
@@ -147,7 +147,7 @@ export function MessageThread({
 				{agentName && (
 					<button
 						onClick={mine ? onRelease : onAssign}
-						title={mine ? "解除您的負責狀態" : conversation.assignedTo ? `接手 ${conversation.assignedTo} 負責的對話` : "將此對話標記為由您負責"}
+						title={mine ? "解除您的負責狀態" : conversation.assignedTo ? `接手「${conversation.assignedTo}」負責的對話` : "將此對話標記為由您負責"}
 						className={`text-xs font-medium rounded-md px-3 py-1.5 border transition-colors ${
 							mine
 								? "border-sky-300 dark:border-sky-700 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-950/40"
@@ -176,12 +176,12 @@ export function MessageThread({
 							disabled={loading}
 							className="text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 disabled:opacity-50"
 						>
-							{loading ? "載入中…" : "載入更早的訊息"}
+							{loading ? "載入中" : "載入更早的訊息"}
 						</button>
 					</div>
 				)}
 				{loading && messages.length === 0 && (
-					<p className="text-sm text-neutral-500 text-center py-6">載入中…</p>
+					<p className="text-sm text-neutral-500 text-center py-6">載入中</p>
 				)}
 				{items}
 			</div>

@@ -25,7 +25,7 @@ function isSameDay(a: Date, b: Date) {
 	);
 }
 
-/** 清單用：今天顯示時間，否則顯示月/日 時:分 */
+/** 清單用：今天顯示時間，否則顯示日期與時間（例：9/1 14:05） */
 export function formatListTime(ts: number | null): string {
 	if (!ts) return "";
 	const d = new Date(ts);

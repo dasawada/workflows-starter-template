@@ -26,7 +26,7 @@ export async function sendNotification(
 	createdBy: string | null,
 ): Promise<Notification | PnpError> {
 	const phone = await hashPhoneNumber(input.phone ?? "");
-	if (!phone) return { error: "電話號碼格式不正確", httpStatus: 400 };
+	if (!phone) return { error: "電話號碼格式不正確。請輸入 09 開頭的手機號碼，或含國碼的號碼（例：+886912345678）。", httpStatus: 400 };
 	const validated = validateLineMessages(input.messages);
 	if (!validated.ok) return { error: validated.error, httpStatus: 400 };
 
@@ -60,7 +60,7 @@ async function pushNotification(env: Env, client: LineClient, notification: Noti
 			kind: "send_failed",
 			severity: "warning",
 			dedupeKey: `pnp_failed:${notification.id}`,
-			title: `通知型訊息發送失敗（${result.status || "網路錯誤"}）`,
+			title: `通知型訊息發送失敗（${result.status || "網路錯誤"}）。`,
 			details: { notificationId: notification.id, phoneMasked: notification.phoneMasked, error: result.error },
 		});
 	}
@@ -71,10 +71,10 @@ async function pushNotification(env: Env, client: LineClient, notification: Noti
 /** 只允許重送 failed 的；PNP 沒有 retry key，sent 的重送會真的再送一次 */
 export async function retryNotification(env: Env, client: LineClient, id: string): Promise<Notification | PnpError> {
 	const notification = await getNotification(env.DB, id);
-	if (!notification) return { error: "找不到此筆通知", httpStatus: 404 };
-	if (notification.status !== "failed") return { error: "僅發送失敗的通知可重新發送", httpStatus: 409 };
+	if (!notification) return { error: "找不到此則通知。", httpStatus: 404 };
+	if (notification.status !== "failed") return { error: "僅發送失敗的通知可重新發送。", httpStatus: 409 };
 	const hash = await getNotificationPhoneHash(env.DB, id);
-	if (!hash) return { error: "找不到收件者", httpStatus: 500 };
+	if (!hash) return { error: "找不到收件者。", httpStatus: 500 };
 	return pushNotification(env, client, notification, hash);
 }
 
@@ -82,7 +82,7 @@ export async function retryNotification(env: Env, client: LineClient, id: string
 export async function handleDeliveryEvent(env: Env, deliveryTag: string, timestamp: number): Promise<void> {
 	const notification = await markNotificationDelivered(env.DB, deliveryTag, timestamp);
 	if (!notification) {
-		// 不是我們發的（別的系統用同一個 channel 送 PNP）：留紀錄，這是「未受監控的發訊來源」
+		// 不是本系統發送的（其他系統使用同一個 channel 發送 PNP）：留紀錄，這是「未受監控的發訊來源」
 		await recordIntegrity(env, {
 			kind: "send_unknown",
 			severity: "info",

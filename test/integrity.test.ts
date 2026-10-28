@@ -253,7 +253,7 @@ describe("multi-agent: assignment, presence and conflicts", () => {
 		});
 		expect(((await takeover.json()) as { conversation: Conversation }).conversation.assignedTo).toBe("阿強");
 		const texts = (await messagesOf("line:U-ma1")).filter((m) => m.sender === "system").map((m) => m.text);
-		expect(texts).toEqual(["小美 已接手此對話", "阿強 已接手此對話（原負責人：小美）"]);
+		expect(texts).toEqual(["「小美」已接手此對話", "「阿強」已接手此對話（原負責人：小美）"]);
 	});
 
 	it("returns 409 when another agent replied after what the sender last saw", async () => {

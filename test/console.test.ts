@@ -164,7 +164,7 @@ describe("LINE webhook", () => {
 		const { messages } = (await msgs.json()) as { messages: Message[] };
 		expect(messages.map((m) => [m.sender, m.text])).toEqual([
 			["system", "使用者加入好友"],
-			["system", "歡迎！"],
+			["system", "歡迎加入。"],
 		]);
 	});
 });

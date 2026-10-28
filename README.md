@@ -5,20 +5,21 @@
 - 技術棧：Cloudflare Workers + D1 + R2 + Durable Objects + Workflows + Queues + Analytics Engine，前端 React 19 + Vite + Tailwind 4。
 - 架構、技術選型與設計原則：[docs/architecture.md](docs/architecture.md)
 - 介面驗收清單（做什麼 → 應該看到什麼）：[docs/acceptance.md](docs/acceptance.md)
+- 中文文案規範：[docs/copy-style.md](docs/copy-style.md)
 - 開發規則（給維護者與 Claude）：[CLAUDE.md](CLAUDE.md)
 
 ## 功能
 
 **客服的日常**
 
-- **即時收發**：使用者訊息 3 秒內出現在客服台；客服回覆以 LINE Push API 送出，同時廣播給其他在線客服。
+- **即時收發**：使用者訊息 3 秒內出現在客服台；客服回覆以 LINE Push API 發送，同時廣播給其他在線客服。
 - **送達狀態**：每則客服訊息都標示發送中／已發送／發送失敗；失敗可重新發送，網路中斷時由排程自動補送，不會重複送達。
 - **引用、撤回、編輯、圖集**：與 LINE 手機端相同的呈現；取不到的資料（例如串接前的引用原文）明確標示。
 - **已讀**：客服打開對話時通知 LINE 已讀（需官方帳號 Chat 開啟）。
 - **逾時提醒**：超過 `REPLY_SLA_MINUTES` 未回覆的對話標記為需要處理，並推給所有在線客服。
 - **多客服協作**：接手／交還、誰正在看同一個對話、回覆衝突提醒（別人接手中或在您之後已回覆）。
 - **異常回報**：覺得某則訊息有問題，按泡泡旁的驚嘆號即可；上下文由系統自動收齊，交給工程端處理。
-- **自動歡迎**：加好友時以 reply token 送出 `WELCOME_MESSAGE`。
+- **自動歡迎**：加好友時以 reply token 發送 `WELCOME_MESSAGE`。
 
 **進階功能**
 
@@ -75,15 +76,16 @@
 | 名稱 | 預設 | 說明 |
 | --- | --- | --- |
 | `REPLY_SLA_MINUTES` | `10` | 多久未回覆視為逾時 |
-| `WELCOME_MESSAGE` | 一段歡迎詞 | 加好友時自動送出；留空則不送 |
+| `WELCOME_MESSAGE` | 一段歡迎詞 | 加好友時自動發送；留空則不發送 |
 | `WEBHOOK_MODE` | `queue` | `queue`＝驗簽後入列立即回 200；`inline`＝同步處理。免費方案由 bootstrap 自動改為 `inline` |
 
 ## 指令
 
 ```bash
-npm run check     # tsc -b（worker 與前端）+ wrangler deploy --dry-run
+npm run check     # tsc -b（worker 與前端）+ 中文文案檢查 + wrangler deploy --dry-run
 npm test          # Vitest，跑在 workerd 內（含 D1 migration）
 npm run lint
+npm run lint:copy # 中文文案檢查（docs/copy-style.md）；加 -- --fix 自動修正空格與標點
 npm run dev       # 本機只看 UI 排版：http://localhost:5173
 npm run deploy    # build + scripts/bootstrap.sh（Workers Builds 會自動執行）
 npm run reports   # 工程端：讀取／結案客服回報與缺口紀錄（直接讀正式 D1，需 wrangler login）
@@ -176,7 +178,7 @@ LINE_CHANNEL_SECRET=<channel secret> CONSOLE_TOKEN=<token> \
 | `webhook.received` | queue 或 inline | 事件數 |
 | `webhook.redelivery` | 事件類型 | 1 |
 | `line.event` | 事件類型、ok 或 error | 處理耗時 ms |
-| `line.api` | endpoint（profile、push、reply、content…）、HTTP 狀態 | 耗時 ms |
+| `line.api` | endpoint（profile、push、reply、content 等）、HTTP 狀態 | 耗時 ms |
 | `queue.consume` | ok 或 retry | 耗時 ms、第幾次嘗試、排隊等待 ms |
 | `queue.dead_letter` | 事件類型 | 1 |
 | `integrity.event` | 缺口類型、嚴重度 | 1 |
@@ -196,8 +198,8 @@ GROUP BY endpoint, status ORDER BY calls DESC
 ## 已知限制
 
 - 客服台為單一共用密鑰，沒有個別帳號與權限；需要時建議改接 Cloudflare Access。
-- 一般回覆只能純文字（可帶引用）；Flex 等互動訊息走編輯台，圖片只能在 JSON 模式以公開網址送出，客服上傳圖片尚未實作。
-- LINE 的按鈕永遠留在聊天室且可反覆按。預設以第一次回覆為準，之後再按只留紀錄並回覆提示；送出時勾「允許使用者更改回覆」則取最後一次。
+- 一般回覆只能純文字（可帶引用）；Flex 等互動訊息走編輯台，圖片只能在 JSON 模式以公開網址發送，客服上傳圖片尚未實作。
+- LINE 的按鈕永遠留在聊天室且可反覆按。預設以第一次回覆為準，之後再按只留紀錄並回覆提示；發送時勾選「允許使用者變更回覆」則取最後一次。
 - 客服台的預覽是近似呈現；JSON 模式的訊息由 LINE API 做最終驗證，錯誤以 502 回到客服台。精確版面請用 LINE Flex Message Simulator。
 - 與 LINE 手機端的呈現差異逐項追蹤於 [docs/acceptance.md](docs/acceptance.md) 第四節（LINE emoji、@提及、位置縮圖等尚未完成）。
 - Teams 尚未實作（schema 與渠道層已預留）。

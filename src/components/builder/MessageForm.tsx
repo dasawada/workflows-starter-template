@@ -42,7 +42,7 @@ export function MessageForm({ message: m, onChange }: Props) {
 						value={m.altText}
 						onChange={(v) => onChange({ ...m, altText: v })}
 						max={LIMITS.altText}
-						hint="顯示於手機通知與聊天列表的文字；留空則使用問句"
+						hint="顯示於手機通知與聊天列表的文字；留空則使用問句。"
 					/>
 					<ActionList actions={m.actions} min={2} max={2} onChange={(actions) => onChange({ ...m, actions })} />
 				</div>
@@ -61,7 +61,7 @@ export function MessageForm({ message: m, onChange }: Props) {
 						multiline
 						rows={3}
 						required
-						hint={hasTitleOrImage ? "有標題或圖片時，內文上限為 60 字" : "無標題與圖片時，內文上限為 160 字"}
+						hint={hasTitleOrImage ? "有標題或圖片時，內文上限為 60 字。" : "無標題與圖片時，內文上限為 160 字。"}
 					/>
 					<TextField label="圖片網址（選填）" value={m.imageUrl} onChange={(v) => onChange({ ...m, imageUrl: v })} max={LIMITS.imageUrl} type="url" placeholder="https://" />
 					<TextField label="通知列文字" value={m.altText} onChange={(v) => onChange({ ...m, altText: v })} max={LIMITS.altText} hint="留空則使用標題或內文" />
@@ -108,7 +108,7 @@ export function MessageForm({ message: m, onChange }: Props) {
 						);
 					})}
 					<SmallButton onClick={addColumn} disabled={m.columns.length >= LIMITS.carousel.columnsMax}>
-						＋ 新增一張卡（{m.columns.length}/{LIMITS.carousel.columnsMax}）
+						＋ 新增一張卡片（{m.columns.length}/{LIMITS.carousel.columnsMax}）
 					</SmallButton>
 				</div>
 			);

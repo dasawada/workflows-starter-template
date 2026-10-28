@@ -403,7 +403,7 @@ async function handleMessage(
 
 /**
  * 引用訊息：LINE 只給 quotedMessageId，不給原文。本地找得到就做快照，找不到也要留關聯並明確標示，
- * 讓客服知道「這是在回某則我們沒有的訊息」，而不是只看到一句沒頭沒尾的話。
+ * 讓客服知道「這是在回某則本系統沒有的訊息」，而不是只看到一句沒頭沒尾的話。
  */
 async function resolveQuote(env: Env, conversationId: string, quotedMessageId: string): Promise<MessageQuote> {
 	const original = await findMessageByExternalId(env.DB, quotedMessageId, conversationId);

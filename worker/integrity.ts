@@ -107,18 +107,18 @@ export async function refreshBotInfo(env: Env): Promise<LineBotInfo | null> {
 			kind: "chat_mode",
 			severity: "warning",
 			dedupeKey: "chat_mode:auto",
-			title: "官方帳號的 Chat 功能目前為關閉狀態。LINE 會自動將收到的訊息標記為已讀，此狀態不代表客服人員已實際閱讀。",
+			title: "官方帳號 Chat 功能已關閉：LINE 會自動標記已讀，已讀狀態不代表客服人員已閱讀",
 			details: { chatMode: info.chatMode, markAsReadMode: info.markAsReadMode, previous: prevInfo?.markAsReadMode ?? null },
 		});
 	} else {
-		await resolveIntegrity(env, "chat_mode:auto", "Chat 功能已開啟，已讀狀態改由客服台控制");
+		await resolveIntegrity(env, "chat_mode:auto", "Chat 功能已開啟，已讀狀態改由客服台控制。");
 	}
 	return info;
 }
 
 /**
  * 排程維護（cron 每 5 分鐘，也可用 POST /api/integrity/maintenance 手動觸發）：
- * 1. 送出中超過 1 分鐘未確認的客服訊息：用同一把 retry key 重推，LINE 回 409 代表早已送達；超過 24 小時標 unknown 並記缺口
+ * 1. 發送中超過 1 分鐘未確認的客服訊息：用同一把 retry key 重推，LINE 回 409 代表早已送達；超過 24 小時標 unknown 並記缺口
  * 2. 附件還沒抓到或抓失敗：重抓，404/410 標過期並記缺口
  * 3. 重新抓 bot info
  */
@@ -132,7 +132,7 @@ export async function runMaintenance(env: Env): Promise<{ outbound: number; medi
 		for (const message of await listPendingOutbound(env.DB, now - 60_000)) {
 			outbound++;
 			if (now - message.createdAt > RETRY_KEY_TTL_MS) {
-				await setDeliveryStatus(env.DB, message.id, "unknown", { error: "超過 24 小時仍無法確認送達結果" });
+				await setDeliveryStatus(env.DB, message.id, "unknown", { error: "超過 24 小時仍無法確認送達結果。" });
 				await recordIntegrity(env, {
 					kind: "send_unknown",
 					severity: "error",

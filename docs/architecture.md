@@ -72,7 +72,7 @@ src/components/            呈現層
 
 邊界規則：
 
-- **SQL 只在 `db.ts`**。其他模組只呼叫具名函式（`insertMessage`、`markConversationRead`…）。寫入路徑維持「寫＋回讀」同一個 `db.batch`。
+- **SQL 只在 `db.ts`**。其他模組只呼叫具名函式（`insertMessage`、`markConversationRead` 等）。寫入路徑維持「寫＋回讀」同一個 `db.batch`。
 - **出站只有一條路**：所有客服訊息經 `sendOutbound`，不在別處呼叫 `client.push`。
 - **渠道細節不外漏**：`line.ts` 只懂 LINE；資料層只看到 `channel` 欄位。新增渠道是新增 `worker/<channel>.ts` 與 `worker/webhook-<channel>.ts`，不是在既有檔案加分支。
 - **契約先行**：API 或事件格式改動先改 `shared/types.ts`，前後端同時被型別檢查（`tsc -b` 涵蓋 worker 與 client 兩個專案）。
@@ -106,7 +106,7 @@ src/components/            呈現層
 ### 互動訊息
 
 - 編輯台（`src/builder/`）只產生五種受控版型：text、confirm、buttons、carousel、固定版面的 Flex 資訊卡。`limits.ts` 是 LINE 上限的唯一來源，`toLine.ts` 的輸出必定合法。JSON 模式留給進階使用者，最終由 LINE API 驗證。
-- 送出時 `instrumentPostbacks` 把每個 postback 改寫成 `prompt=<id>&choice=<原值>`；有 postback 才建 `prompts` 紀錄。改寫後超過 LINE 的 300 字元上限就在送出前回 400「字數超出上限」，不讓 LINE 的拒收變成客服看不懂的發送失敗。
+- 發送時 `instrumentPostbacks` 把每個 postback 改寫成 `prompt=<id>&choice=<原值>`；有 postback 才建 `prompts` 紀錄。改寫後超過 LINE 的 300 字元上限就在發送前回 400「字數超出上限」，不讓 LINE 的拒收變成客服看不懂的發送失敗。
 - 使用者點選後回到 webhook 的 `handlePostback`：每次都寫 `prompt_responses`，但只有第一次（或 `allow_change = 1`）更新結果；LINE 的按鈕永遠可按，這是在資料層定義的規則。
 
 ### 逾時提醒
@@ -119,7 +119,7 @@ src/components/            呈現層
 
 ## 六、設計原則
 
-1. **資料忠實，呈現還原。** D1 存 LINE 給的原始形狀（一張圖一個事件、貼圖只有 id、emoji 是佔位字元、引用與撤回存在 `metadata`）。還原成 LINE 手機端的樣子（圖集收斂成格子泡泡、貼圖顯示圖片）是前端呈現層的工作，不改資料模型。資料拿不到的（對方是否已讀、組合貼圖內容、串接前的引用原文）明確標示，不假裝。
+1. **資料忠實，呈現還原。** D1 存 LINE 給的原始形狀（一張圖一個事件、貼圖只有 id、emoji 是佔位字元、引用與撤回存在 `metadata`）。還原成 LINE 手機端的樣子（圖集收斂成格子泡泡、貼圖顯示圖片）是前端呈現層的工作，不改資料模型。無法取得的資料（對方是否已讀、組合貼圖內容、串接前的引用原文）明確標示，不假裝。
 2. **沒有證據就不宣稱完整，但缺口是工程端的事。** 已知的缺口（引用找不到原文、附件過期、發送結果不明、LINE 重送、事件放棄、Chat 設定）都寫進 `integrity_events`，以 `dedupe_key` 合併計數。客服台不顯示這些；客服唯一的入口是泡泡旁的驚嘆號，按一下即可，上下文由伺服器收齊。
 3. **每一步都可以重做。** webhook 事件、Queues 重試、客服連點、cron 重推、CSV 重複匯入，全部以識別碼去重（`external_id`、`webhookEventId`、`retry_key`、`csv:<hash>`、`delivery_tag`）。先寫再送：任何時刻中斷，狀態都能從 D1 判讀並由排程補完。
 4. **單一入口。** 同一件事只有一個地方做：SQL 在 `db.ts`、發訊在 `outbox.ts`、打 API 在 `src/api.ts`、畫面狀態在 `src/route.ts`、LINE 上限在 `src/builder/limits.ts`。找得到、改一處就全部生效。

@@ -423,7 +423,7 @@ describe("POST /api/conversations/:id/send (raw LINE messages)", () => {
 			}),
 		});
 		expect(res.status).toBe(400);
-		expect(((await res.json()) as { error: string }).error).toBe("字數超出上限");
+		expect(((await res.json()) as { error: string }).error).toBe("字數超出上限。");
 		const stored = await env.DB.prepare("SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND direction = 'outbound'")
 			.bind("line:U-long")
 			.first<{ n: number }>();

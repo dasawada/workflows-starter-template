@@ -93,7 +93,7 @@ export function BuilderDialog({ onClose, onSend, onSwitchToJson }: Props) {
 			await onSend({ messages, templateKey: `builder:${presetKey}`, allowChange });
 			onClose();
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "發送失敗");
+			setError(err instanceof Error ? err.message : "發送失敗。請稍後再試。");
 		} finally {
 			setSending(false);
 		}
@@ -132,7 +132,7 @@ export function BuilderDialog({ onClose, onSend, onSwitchToJson }: Props) {
 					{/* 左：訊息清單與表單 */}
 					<div className="lg:col-span-3 overflow-y-auto p-4 space-y-3 border-r border-neutral-200 dark:border-neutral-800">
 						{draft.messages.length === 0 && (
-							<p className="text-sm text-neutral-500 text-center py-6">尚未加入訊息，請由下方選擇類型加入</p>
+							<p className="text-sm text-neutral-500 text-center py-6">尚未加入訊息，請由下方選擇類型加入。</p>
 						)}
 						{draft.messages.map((m, i) => {
 							const open = openId === m.id;
@@ -230,7 +230,7 @@ export function BuilderDialog({ onClose, onSend, onSwitchToJson }: Props) {
 
 				<div className="flex items-center gap-3 px-5 py-3 border-t border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
 					{trackable > 0 && (
-						<label className="flex items-center gap-1.5 text-xs text-neutral-600 dark:text-neutral-400" title="LINE 的按鈕可重複點選；預設僅採用第一次選擇，之後的點選只回覆提示而不變更結果">
+						<label className="flex items-center gap-1.5 text-xs text-neutral-600 dark:text-neutral-400" title="LINE 的按鈕可重複點選；預設僅採用第一次選擇，之後的點選只回覆提示而不變更結果。">
 							<input type="checkbox" checked={allowChange} onChange={(e) => setAllowChange(e.target.checked)} className="accent-emerald-600" />
 							允許使用者變更回覆（以最後一次為準）
 						</label>
@@ -240,7 +240,7 @@ export function BuilderDialog({ onClose, onSend, onSwitchToJson }: Props) {
 						<span className="text-xs text-amber-600">尚有 {errors.length} 項需修正後才能發送</span>
 					)}
 					{!error && errors.length === 0 && draft.messages.length > 0 && (
-						<span className="text-xs text-emerald-600">格式正確，可以發送</span>
+						<span className="text-xs text-emerald-600">格式正確，可以發送。</span>
 					)}
 					<button onClick={onClose} className="ml-auto text-sm px-4 py-2 rounded-lg text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800">
 						取消
@@ -250,7 +250,7 @@ export function BuilderDialog({ onClose, onSend, onSwitchToJson }: Props) {
 						disabled={sending || errors.length > 0 || draft.messages.length === 0}
 						className="text-sm font-medium px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white"
 					>
-						{sending ? "發送中…" : "發送"}
+						{sending ? "發送中" : "發送"}
 					</button>
 				</div>
 			</div>

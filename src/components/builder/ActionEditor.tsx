@@ -52,7 +52,7 @@ export function ActionEditor({ action, index, labelMax = LIMITS.actionLabel, onC
 							max={50}
 							required
 							placeholder="accept"
-							hint="記錄至資料庫的代碼，建議使用英文或短字串"
+							hint="記錄至資料庫的代碼，建議使用英文或短字串。"
 						/>
 						<TextField
 							label="聊天室顯示文字"
@@ -64,7 +64,7 @@ export function ActionEditor({ action, index, labelMax = LIMITS.actionLabel, onC
 						/>
 					</div>
 					<Toggle
-						label="按下後開啟鍵盤，供使用者補充文字"
+						label="按下後開啟鍵盤，供使用者補充文字。"
 						checked={action.openKeyboard}
 						onChange={(v) => onChange({ ...action, openKeyboard: v })}
 					/>

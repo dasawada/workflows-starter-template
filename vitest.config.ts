@@ -20,7 +20,7 @@ export default defineConfig(async () => {
 						LINE_CHANNEL_ACCESS_TOKEN: "test-access-token",
 						CONSOLE_TOKEN: "test-console-token",
 						REPLY_SLA_MINUTES: "1",
-						WELCOME_MESSAGE: "歡迎！",
+						WELCOME_MESSAGE: "歡迎加入。",
 						// 測試用同步模式；queue 消費者另以 createMessageBatch 直接測
 						WEBHOOK_MODE: "inline",
 					},

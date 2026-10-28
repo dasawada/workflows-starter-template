@@ -31,7 +31,7 @@ export function NotificationsPanel({ refreshKey, onClose }: Props) {
 		try {
 			setItems((await api.listNotifications()).notifications);
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "載入失敗");
+			setError(err instanceof Error ? err.message : "載入失敗。請稍後再試。");
 		}
 	}, []);
 
@@ -49,7 +49,7 @@ export function NotificationsPanel({ refreshKey, onClose }: Props) {
 			setNote("");
 			await load();
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "發送失敗");
+			setError(err instanceof Error ? err.message : "發送失敗。請稍後再試。");
 			await load();
 		} finally {
 			setBusy(false);
@@ -60,7 +60,7 @@ export function NotificationsPanel({ refreshKey, onClose }: Props) {
 		try {
 			await api.retryNotification(n.id);
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "重送失敗");
+			setError(err instanceof Error ? err.message : "重新發送失敗。請稍後再試。");
 		}
 		await load();
 	};
@@ -110,7 +110,7 @@ export function NotificationsPanel({ refreshKey, onClose }: Props) {
 						disabled={busy || !phone.trim() || !text.trim()}
 						className="px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
 					>
-						{busy ? "發送中…" : "發送"}
+						{busy ? "發送中" : "發送"}
 					</button>
 				</section>
 
@@ -138,7 +138,7 @@ export function NotificationsPanel({ refreshKey, onClose }: Props) {
 										<td className="px-3 py-2 whitespace-nowrap">{formatListTime(n.createdAt)}</td>
 										<td className="px-3 py-2 whitespace-nowrap font-mono">{n.phoneMasked}</td>
 										<td className="px-3 py-2 max-w-xs">
-											<div className="line-clamp-2">{first?.text ?? first?.altText ?? `[${first?.type ?? "訊息"}]`}</div>
+											<div className="line-clamp-2">{first?.text ?? first?.altText ?? "[互動訊息]"}</div>
 										</td>
 										<td className="px-3 py-2">{n.note ?? ""}</td>
 										<td className="px-3 py-2 whitespace-nowrap">

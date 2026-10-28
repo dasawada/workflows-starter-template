@@ -38,7 +38,7 @@
 		// 客服多久沒回覆就標記「待處理」並推播提醒（分鐘）
 		"REPLY_SLA_MINUTES": "10",
 		// 使用者加好友時自動回覆的歡迎詞，留空則不送
-		"WELCOME_MESSAGE": "您好，感謝加入好友！請直接留言，客服人員會盡快回覆您。",
+		"WELCOME_MESSAGE": "您好，感謝您加入好友。請直接留言，客服人員會盡快回覆您。",
 		// webhook 處理方式：queue = 驗簽後丟進 Queues 立即回 200（需 Workers Paid）；inline = 同步處理
 		"WEBHOOK_MODE": "queue"
 	},

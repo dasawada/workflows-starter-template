@@ -9,6 +9,7 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 文件分工：
 - `docs/architecture.md`：架構、技術選型的理由、模組分層、資料流、設計原則。動到分層、資料流或新增 Cloudflare 資源時同步更新。
 - `docs/acceptance.md`：介面驗收清單（見下方「介面設計原則」）。
+- `docs/copy-style.md`：中文文案規範（標點、排版、用語）；`npm run lint:copy` 自動檢查可機械判斷的部分。
 - `README.md`：功能、部署、密鑰、API、指令、監控。新增路由或指標時同步更新。
 - 本檔：改程式時必須遵守的規則與已知陷阱。
 
@@ -18,7 +19,7 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 - Claude 的職責是改好程式、通過 `npm run check` 與 `npm test`、commit 並 push 到 `main`；部署與密鑰設定在 Cloudflare dashboard 完成，Claude 不需要也不應登入 Cloudflare。
 - `wrangler.jsonc` 的 `database_id` 是 D1 資源識別碼（非密鑰），已寫入正式值；若換帳號或重建資料庫，bootstrap 會自動覆寫（含 dist 內已產生的 wrangler.json）。
 - **一切功能都在正式環境部署後直接驗證**，不以本機開發伺服器為驗證依據。
-- 改完程式碼的標準流程：`npm run check`（`tsc -b` + dry-run）→ `npm test` → commit 並 push 到 `main`（Workers Builds 自動部署）→ 由使用者以真實 LINE 帳號與客服台操作確認。
+- 改完程式碼的標準流程：`npm run check`（`tsc -b` + 文案檢查 + dry-run）→ `npm test` → commit 並 push 到 `main`（Workers Builds 自動部署）→ 由使用者以真實 LINE 帳號與客服台操作確認。
 - 查正式環境狀況的指令（需使用者本機已 `wrangler login`，由使用者執行或明確授權後執行）：`npx wrangler tail`、`npx wrangler d1 execute DB --remote --command "..."`、`npm run reports`。
 - 不要為了驗證而建立假資料的本機流程；本機 `npm run dev` 只用來看 UI 排版。
 
@@ -68,27 +69,27 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 - TypeScript 開了 `erasableSyntaxOnly`：不能用 constructor 參數屬性、enum、namespace。
 - 移除功能時以「呼叫端」為單位清乾淨：前端畫面、`src/api.ts`、後端路由、`shared/types.ts` 的型別與 WebSocket 事件、測試、README／CLAUDE.md／`docs/` 一起改；改完以 `grep` 確認沒有殘留引用。
 - 縮排用 tab。回覆與註解用繁體中文，識別字用英文。
-- 使用者看得到的文案（前端、後端回傳的錯誤與系統訊息、完整性事件標題）一律正式書面語：不用口語（拿、塞、搞、看看、～）、不用表情符號、量詞用「個」「張卡片」「則」、對使用者稱「您」、提示句以句號結尾。
+- 所有中文文字（介面、後端錯誤與系統訊息、傳給 LINE 使用者的訊息、缺口標題、腳本輸出、程式註解、文件）依 `docs/copy-style.md`；示範內容（`src/presets.ts`、`src/builder/presets.ts`）除外。改完跑 `npm run lint:copy`，可機械修正的用 `npm run lint:copy -- --fix`。
 - 新增渠道（如 Teams）時：新增 `worker/<channel>.ts` 與 `worker/webhook-<channel>.ts`，資料寫入仍走 `db.ts`，`channel` 欄位填對應值，`handleReply` 依 `channel` 分派。
 - 部署流程改動（新 binding、新資源）要同步更新 README 的「正式部署」段落與 `docs/architecture.md` 的技術選型表。
 
 ## 介面設計原則（Apple Human Interface Guidelines 的精神，每個 session 都要遵守）
 
 驗收以 `docs/acceptance.md` 為準（做什麼 → 應該看到什麼）；改介面前先讀它，改完對著它逐條確認，新行為要補進去。
-兩種模式以視窗寬度 1024px（Tailwind `lg`）切換，不以裝置判斷：電腦模式像 macOS 的「訊息」（左清單右內容、鍵盤優先、滑過才出現次要控制項），手機模式像 LINE（一次一個畫面、底部分頁列只在清單出現、進對話後全站標題列讓位、Enter 換行按鈕送出、次要控制項一律顯示）。有沒有滑鼠以 CSS `@media (hover: hover) and (pointer: fine)` 判斷（`src/index.css` 的 `.bubble-actions`）。
+兩種模式以視窗寬度 1024px（Tailwind `lg`）切換，不以裝置判斷：電腦模式像 macOS 的「訊息」（左清單右內容、鍵盤優先、滑過才出現次要控制項），手機模式像 LINE（一次一個畫面、底部分頁列只在清單出現、進對話後全站標題列讓位、Enter 換行、按鈕發送、次要控制項一律顯示）。有沒有滑鼠以 CSS `@media (hover: hover) and (pointer: fine)` 判斷（`src/index.css` 的 `.bubble-actions`）。
 
 使用者是客服人員，不是工程師；他們把這些當成基礎設施，一旦不符預期就是「壞掉」。簡單就是最好的。
 
 - **清晰（Clarity）**：每個畫面只回答「現在怎麼了」「我要做什麼」。一個狀態一句話，一個問題一個動作。不把內部狀態（queue 模式、markAsReadMode、cron、retry key）做成介面。
 - **退讓（Deference）**：介面退到內容後面。沒有裝飾性元素、沒有表情符號、沒有數字卡片牆；顏色只用來表達狀態（紅＝需要處理、琥珀＝注意、綠＝正常），不用來好看。
-- **標準控制項、標準行為**：按鈕像按鈕、連結像連結；Enter 送出、Escape 關閉、點外面關閉浮層、瀏覽器上一頁有作用（`src/route.ts`）。任何暫時性的浮層（對話框、下拉清單、提示）都必須能用 Escape 與點擊外部關閉，否則不要做浮層——改成單擊完成的動作或行內元素。
+- **標準控制項、標準行為**：按鈕像按鈕、連結像連結；Enter 發送、Escape 關閉、點外面關閉浮層、瀏覽器上一頁有作用（`src/route.ts`）。任何暫時性的浮層（對話框、下拉清單、提示）都必須能用 Escape 與點擊外部關閉，否則不要做浮層——改成單擊完成的動作或行內元素。
 - **直接操作、即時回饋**：動作發生在內容旁邊（泡泡旁的驚嘆號、訊息下方的狀態），按下去立刻有可見結果（已回報、已發送、發送失敗＋重新發送）。不要先問原因再做事；選填的說明永遠不該擋在主要動作前面。
 - **一致性**：同類元素用同一個元件與同一套字級、間距、圓角（既有：標題列 `text-sm font-semibold`、說明 `text-xs text-neutral-500`、按鈕 `text-xs rounded-md px-3 py-1.5`）。新功能必須融入既有版面，不另起一套樣式。
 - **漸進揭露**：預設只顯示必要資訊；細節放在 `title` 提示或可展開區塊，而不是一開始全部攤開。
 - **可觸及**：可點的東西至少 24px（滑鼠）／44px（觸控）；hover 才出現的控制項要有 `focus-visible` 可見狀態。
 - **改版面前先看基礎**：在既有元件外層包東西（例如為了放一個按鈕加 flex 容器）之前，先確認不會改變原本的對齊與寬度；用 `flex-row-reverse` 之類會反轉語意的工具時要特別小心（曾因此把客服訊息從靠右變成靠左）。改完一定開 `npm run dev` 看對話頁、清單、對話框三個畫面。
-- **文案**：正式書面語（見上方慣例），短句，先說結論再說原因；錯誤訊息說「發生了什麼、接下來怎麼做」。
-- **以 LINE 手機端的呈現為基準**：使用者在 LINE 看到的樣子就是客服的預期。webhook 的資料形狀（一張圖一個事件、貼圖只有 id、文字裡的 emoji 是佔位字元）不等於呈現；呈現層要還原成 LINE 的樣子（圖集收斂成一個格子泡泡、貼圖與 LINE emoji 顯示圖片、@提及加粗），資料拿不到的（對方是否已讀、組合貼圖內容）則明確標示，不假裝。這類差異一律在前端呈現層解決，不改資料模型。
+- **文案**：依 `docs/copy-style.md`；短句，先說結論再說原因；錯誤訊息說「發生了什麼、接下來怎麼做」。
+- **以 LINE 手機端的呈現為基準**：使用者在 LINE 看到的樣子就是客服的預期。webhook 的資料形狀（一張圖一個事件、貼圖只有 id、文字裡的 emoji 是佔位字元）不等於呈現；呈現層要還原成 LINE 的樣子（圖集收斂成一個格子泡泡、貼圖與 LINE emoji 顯示圖片、@提及加粗），無法取得的資料（對方是否已讀、組合貼圖內容）則明確標示，不假裝。這類差異一律在前端呈現層解決，不改資料模型。
 
 ## 效能與成本原則
 

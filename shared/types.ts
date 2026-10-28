@@ -3,9 +3,9 @@
  */
 
 export type Channel = "line" | "teams";
-/** 訊息從哪裡來：webhook 收到、客服台送出、系統產生、官方後台 CSV 匯入 */
+/** 訊息從哪裡來：webhook 收到、客服台發送、系統產生、官方後台 CSV 匯入 */
 export type MessageSource = "line_webhook" | "console" | "system" | "manager_csv";
-/** 客服送出訊息的送達狀態；unknown = 送出結果無法在 24 小時內確認 */
+/** 客服發送訊息的送達狀態；unknown = 發送結果無法在 24 小時內確認 */
 export type DeliveryStatus = "pending" | "sent" | "failed" | "unknown";
 /** 使用者附件的保存狀態 */
 export type MediaStatus = "pending" | "stored" | "failed" | "expired";
@@ -71,11 +71,11 @@ export interface Message {
 	/** 使用者撤回的時間；撤回後 text / media 已清除，只保留時間軸位置 */
 	unsentAt: number | null;
 	source: MessageSource;
-	/** 客服送出的訊息才有 */
+	/** 客服發送的訊息才有 */
 	deliveryStatus: DeliveryStatus | null;
 	/** 有附件的使用者訊息才有 */
 	mediaStatus: MediaStatus | null;
-	/** 送出這則訊息的客服 */
+	/** 發送這則訊息的客服 */
 	agentName: string | null;
 }
 
@@ -105,7 +105,7 @@ export interface PromptOption {
 
 export type PromptStatus = "pending" | "answered";
 
-/** 可追蹤訊息：送出帶按鈕的訊息並記錄使用者選擇 */
+/** 可追蹤訊息：發送帶按鈕的訊息並記錄使用者選擇 */
 export interface Prompt {
 	id: string;
 	conversationId: string;
@@ -120,7 +120,7 @@ export interface Prompt {
 	choiceLabel: string | null;
 	respondedAt: number | null;
 	createdAt: number;
-	/** 實際送出的 LINE 訊息陣列 */
+	/** 實際發送的 LINE 訊息陣列 */
 	payload: unknown[] | null;
 	/** 使用者重複按按鈕時是否採用最後一次（false = 第一次為準） */
 	allowChange: boolean;
@@ -128,13 +128,13 @@ export interface Prompt {
 	displayName?: string | null;
 }
 
-/** 多客服協作：送出時附上的衝突偵測資訊 */
+/** 多客服協作：發送時附上的衝突偵測資訊 */
 export interface SendGuard {
 	/** 前端產生的 UUID，同一把 key 重送不會重複推給 LINE（也是 X-Line-Retry-Key） */
 	clientKey?: string;
-	/** 客服送出時畫面上最後一則訊息；之後若有其他客服回覆，伺服器會回 409 */
+	/** 客服發送時畫面上最後一則訊息；之後若有其他客服回覆，伺服器會回 409 */
 	lastSeenMessageId?: string;
-	/** 已確認衝突仍要送出 */
+	/** 已確認衝突仍要發送 */
 	force?: boolean;
 }
 
@@ -144,7 +144,7 @@ export interface ReplyInput extends SendGuard {
 	quoteMessageId?: string;
 }
 
-/** 直接送 LINE 訊息陣列（Flex / template / quick reply…）；postback 按鈕會自動加上追蹤 id */
+/** 直接送 LINE 訊息陣列（Flex / template / quick reply 等）；postback 按鈕會自動加上追蹤 id */
 export interface SendMessagesInput extends SendGuard {
 	messages: unknown[];
 	templateKey?: string;
@@ -158,7 +158,7 @@ export interface SendConflict {
 	code: "assigned" | "newer_reply";
 	error: string;
 	assignedTo?: string | null;
-	/** 其他客服在你之後送出的訊息 */
+	/** 其他客服人員在此客服之後發送的訊息 */
 	messages?: Message[];
 }
 

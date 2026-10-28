@@ -54,7 +54,7 @@ export function ImportPanel({ onOpenConversation, onClose }: Props) {
 			const { groups } = await api.importRows(batch.id);
 			setGroups(groups);
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "載入失敗");
+			setError(err instanceof Error ? err.message : "載入失敗。請稍後再試。");
 		}
 	};
 
@@ -75,7 +75,7 @@ export function ImportPanel({ onOpenConversation, onClose }: Props) {
 			setMapping(p.mapping);
 			if (!accountName && p.accountName) setAccountName(p.accountName);
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "預覽失敗");
+			setError(err instanceof Error ? err.message : "預覽失敗。請稍後再試。");
 		} finally {
 			setBusy(false);
 		}
@@ -92,7 +92,7 @@ export function ImportPanel({ onOpenConversation, onClose }: Props) {
 			await loadBatches();
 			await openBatch(batch);
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "匯入失敗");
+			setError(err instanceof Error ? err.message : "匯入失敗。請稍後再試。");
 		} finally {
 			setBusy(false);
 		}
@@ -105,7 +105,7 @@ export function ImportPanel({ onOpenConversation, onClose }: Props) {
 			await openBatch(batch);
 			await loadBatches();
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "指派失敗");
+			setError(err instanceof Error ? err.message : "指派失敗。請稍後再試。");
 		}
 	};
 
@@ -116,7 +116,7 @@ export function ImportPanel({ onOpenConversation, onClose }: Props) {
 			await openBatch(batch);
 			await loadBatches();
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "更新失敗");
+			setError(err instanceof Error ? err.message : "更新失敗。請稍後再試。");
 		}
 	};
 
@@ -149,6 +149,7 @@ export function ImportPanel({ onOpenConversation, onClose }: Props) {
 							setPreview(null);
 						}}
 						rows={5}
+						// copy-lint-disable-next-line（CSV 範例，逗號是欄位分隔）
 						placeholder={"聊天室名稱,日期,時間,發送者,訊息內容\n王小美,2026/09/01,09:00,王小美,請問有貨嗎"}
 						className="w-full font-mono rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-emerald-500"
 					/>
@@ -167,7 +168,7 @@ export function ImportPanel({ onOpenConversation, onClose }: Props) {
 							disabled={busy || !csv.trim()}
 							className="ml-auto px-3 py-1.5 rounded-md bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 disabled:opacity-50"
 						>
-							{busy ? "處理中…" : "預覽並配對"}
+							{busy ? "處理中" : "預覽並配對"}
 						</button>
 					</div>
 				</section>
@@ -249,7 +250,7 @@ export function ImportPanel({ onOpenConversation, onClose }: Props) {
 											onChange={(id) => setAssignments((prev) => ({ ...prev, [c.name]: id }))}
 										/>
 										{!c.conversationId && !assignments[c.name] && (
-											<span className="text-amber-600 dark:text-amber-400">{c.candidates.length > 1 ? "有多筆同名對話，請指定其一" : "查無對應對話，可於匯入後指派"}</span>
+											<span className="text-amber-600 dark:text-amber-400">{c.candidates.length > 1 ? "有多個同名的對話，請指定其中一個。" : "查無對應的對話，可於匯入後指派。"}</span>
 										)}
 									</li>
 								))}
@@ -262,7 +263,7 @@ export function ImportPanel({ onOpenConversation, onClose }: Props) {
 								disabled={busy || preview.missing.length > 0}
 								className="px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
 							>
-								{busy ? "匯入中…" : "執行匯入"}
+								{busy ? "匯入中" : "執行匯入"}
 							</button>
 						</div>
 					</section>
@@ -405,7 +406,7 @@ function ConversationPicker({ onPick, compact, picked }: { onPick: (id: string) 
 				onChange={(e) => setQ(e.target.value)}
 				onKeyDown={(e) => e.key === "Escape" && setResults([])}
 				onBlur={() => window.setTimeout(() => setResults([]), 150)}
-				placeholder={picked ? `已選擇 ${picked}` : "搜尋對話名稱或 ID"}
+				placeholder={picked ? `已選擇「${picked}」` : "搜尋對話名稱或 ID"}
 				className={`rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-2 py-1 ${compact ? "w-44" : "w-56"}`}
 			/>
 			{results.length > 0 && (

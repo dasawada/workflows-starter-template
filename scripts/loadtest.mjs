@@ -21,7 +21,7 @@ const secret = process.env.LINE_CHANNEL_SECRET;
 const token = process.env.CONSOLE_TOKEN;
 
 if (!url || !secret) {
-	console.error("需要 --url 與環境變數 LINE_CHANNEL_SECRET");
+	console.error("缺少 --url 或環境變數 LINE_CHANNEL_SECRET。");
 	process.exit(1);
 }
 
@@ -103,9 +103,9 @@ if (token) {
 	}
 	const drainSeconds = (performance.now() - t1) / 1000;
 	if (persisted >= count) {
-		console.log(`${persisted}/${count} 筆全部入庫，從送完到入庫完成 ${drainSeconds.toFixed(1)} 秒（queue 模式下這是消費延遲）`);
+		console.log(`${persisted}/${count} 筆全部入庫，從發送完畢到入庫完成 ${drainSeconds.toFixed(1)} 秒（queue 模式下這是消費延遲）`);
 	} else {
-		console.log(`!! 90 秒內只有 ${persisted}/${count} 筆入庫，請到 Queues dashboard 看 backlog 與 dead letter queue`);
+		console.log(`!! 90 秒內只有 ${persisted}/${count} 筆入庫，請至 Queues dashboard 檢查 backlog 與 dead letter queue。`);
 	}
 } else {
 	console.log("\n（未提供 CONSOLE_TOKEN，略過入庫核對）");

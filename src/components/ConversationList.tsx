@@ -111,7 +111,7 @@ export function ConversationList({
 			</div>
 
 			<div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto">
-				{loading && total === 0 && <p className="p-4 text-sm text-neutral-500">載入中…</p>}
+				{loading && total === 0 && <p className="p-4 text-sm text-neutral-500">載入中</p>}
 				{!loading && total === 0 && (
 					<p className="p-6 text-sm text-center text-neutral-500">{query ? "查無符合條件的對話" : "目前沒有對話"}</p>
 				)}
@@ -128,7 +128,7 @@ export function ConversationList({
 						))}
 					</ul>
 				)}
-				{loading && total > 0 && <p className="py-2 text-center text-[11px] text-neutral-400">載入更多…</p>}
+				{loading && total > 0 && <p className="py-2 text-center text-[11px] text-neutral-400">載入更多</p>}
 				{!hasMore && total > 0 && <p className="py-2 text-center text-[11px] text-neutral-400">已顯示全部</p>}
 			</div>
 		</div>
@@ -169,7 +169,7 @@ const Row = memo(function Row({ conversation: c, selected, top, onSelect }: RowP
 							</span>
 						)}
 						{c.assignedTo && (
-							<span title={`由 ${c.assignedTo} 負責`} className="shrink-0 max-w-16 truncate text-[10px] px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-300">
+							<span title={`由「${c.assignedTo}」負責`} className="shrink-0 max-w-16 truncate text-[10px] px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-300">
 								{c.assignedTo}
 							</span>
 						)}

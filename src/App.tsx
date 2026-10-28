@@ -115,7 +115,7 @@ function App() {
 		} catch (err) {
 			setToken(null);
 			setLoginError(
-				err instanceof ApiError && err.status === 401 ? "密鑰不正確" : "無法連線至伺服器",
+				err instanceof ApiError && err.status === 401 ? "密鑰不正確。請確認後重新輸入。" : "無法連線至伺服器。請檢查網路連線後再試。",
 			);
 		} finally {
 			setLoginBusy(false);
@@ -398,7 +398,7 @@ function App() {
 		});
 	}, []);
 
-	/** 送出時附上畫面上最後一則訊息，伺服器用它判斷有沒有其他客服在這之後回覆 */
+	/** 發送時附上畫面上最後一則訊息，伺服器用它判斷有沒有其他客服在這之後回覆 */
 	const lastSeenMessageId = () => messages[messages.length - 1]?.id;
 
 	const handleSend = async (text: string, force: boolean) => {
@@ -479,7 +479,7 @@ function App() {
 	};
 
 	const changeAgentName = () => {
-		const next = window.prompt("請輸入客服名稱（供同事識別）", agentName ?? "");
+		const next = window.prompt("請輸入客服名稱，供同事識別。", agentName ?? "");
 		if (next === null) return;
 		const name = next.trim().slice(0, 40);
 		if (!name) return;
@@ -512,7 +512,7 @@ function App() {
 	if (auth === "checking") {
 		return (
 			<div className="min-h-screen flex items-center justify-center text-sm text-neutral-500 dark:bg-neutral-950">
-				載入中…
+				載入中
 			</div>
 		);
 	}
@@ -575,7 +575,7 @@ function App() {
 					<span
 						className={`w-2 h-2 rounded-full ${connected ? "bg-emerald-500" : "bg-amber-500 animate-pulse"}`}
 					/>
-					{connected ? "即時連線中" : "重新連線中…"}
+					{connected ? "即時連線中" : "重新連線中"}
 				</span>
 				<button
 					onClick={handleLogout}
@@ -653,7 +653,7 @@ function App() {
 						/>
 					) : (
 						<div className="h-full flex items-center justify-center text-sm text-neutral-400">
-							請從左側清單選擇對話
+							請從左側清單選擇對話。
 						</div>
 					)}
 				</main>

@@ -6,7 +6,7 @@ import { MEDIA_MAX_ATTEMPTS, recordIntegrity, resolveIntegrity } from "./integri
 
 /**
  * 把使用者傳來的附件抓到 R2。LINE 只保留一段時間，所以：
- * - 404 / 410：標 expired，記缺口（這段內容永久拿不到了）
+ * - 404 / 410：標 expired，記缺口（此內容已永久無法取得）
  * - 其他失敗：標 failed，排程會重試到 MEDIA_MAX_ATTEMPTS，之後記缺口
  * - 成功：標 stored，若先前有缺口紀錄就關閉
  */
@@ -41,7 +41,7 @@ export async function storeMedia(env: Env, client: LineClient, message: Message)
 			customMetadata: { conversationId: message.conversationId, messageId: message.id },
 		});
 		const updated = await updateMessageMedia(env.DB, message.id, key, content.contentType);
-		if (attempts > 1) await resolveIntegrity(env, dedupeKey, "附件已重新下載成功");
+		if (attempts > 1) await resolveIntegrity(env, dedupeKey, "附件已重新下載。");
 		if (updated) {
 			const conversation = await getConversation(env.DB, message.conversationId);
 			if (conversation) {

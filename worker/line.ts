@@ -209,13 +209,13 @@ const isObject = (v: unknown): v is Json => typeof v === "object" && v !== null 
 
 /** 基本結構檢查；細節交給 LINE API 驗證並把錯誤回給客服台 */
 export function validateLineMessages(raw: unknown): { ok: true; messages: Json[] } | { ok: false; error: string } {
-	if (!Array.isArray(raw) || raw.length === 0) return { ok: false, error: "messages 必須是非空陣列" };
-	if (raw.length > MAX_MESSAGES_PER_PUSH) return { ok: false, error: `一次最多 ${MAX_MESSAGES_PER_PUSH} 則訊息` };
+	if (!Array.isArray(raw) || raw.length === 0) return { ok: false, error: "messages 必須是非空陣列。" };
+	if (raw.length > MAX_MESSAGES_PER_PUSH) return { ok: false, error: `一次最多發送 ${MAX_MESSAGES_PER_PUSH} 則訊息。` };
 	for (const [i, m] of raw.entries()) {
-		if (!isObject(m) || typeof m.type !== "string") return { ok: false, error: `第 ${i + 1} 則缺少 type` };
-		if (!ALLOWED_MESSAGE_TYPES.has(m.type)) return { ok: false, error: `第 ${i + 1} 則的 type「${m.type}」不支援` };
+		if (!isObject(m) || typeof m.type !== "string") return { ok: false, error: `第 ${i + 1} 則訊息缺少 type。` };
+		if (!ALLOWED_MESSAGE_TYPES.has(m.type)) return { ok: false, error: `第 ${i + 1} 則訊息的 type「${m.type}」不受支援。` };
 		if ((m.type === "template" || m.type === "flex") && typeof m.altText !== "string") {
-			return { ok: false, error: `第 ${i + 1} 則（${m.type}）需要 altText` };
+			return { ok: false, error: `第 ${i + 1} 則訊息（${m.type}）缺少 altText。` };
 		}
 	}
 	return { ok: true, messages: raw as Json[] };
@@ -225,7 +225,7 @@ export function validateLineMessages(raw: unknown): { ok: true; messages: Json[]
  * 走訪訊息內所有 postback action，把 data 改寫成 prompt=<id>&choice=<value>。
  * value 取原本的 data（若有）否則取 label / displayText；回傳可供追蹤的選項清單。
  * 同一個 value 出現多次（例如 carousel 每張卡都有「承接」）會合併成一個選項。
- * 改寫後任何一個 data 超過 POSTBACK_DATA_MAX 時 tooLong = true，LINE 會拒收整批訊息，呼叫端應在送出前擋下。
+ * 改寫後任何一個 data 超過 POSTBACK_DATA_MAX 時 tooLong = true，LINE 會拒收整批訊息，呼叫端應在發送前擋下。
  */
 export function instrumentPostbacks(
 	messages: Json[],
@@ -245,7 +245,7 @@ export function instrumentPostbacks(
 			const label =
 				(typeof out.label === "string" && out.label) ||
 				(typeof out.displayText === "string" && out.displayText) ||
-				`選項${++counter}`;
+				`選項 ${++counter}`;
 			let value = typeof out.data === "string" && out.data.trim() ? out.data.trim() : label;
 			if (value.startsWith("prompt=")) {
 				const parsed = parsePromptPostback(value);
@@ -277,7 +277,7 @@ export function summarizeMessages(messages: Json[]): { body: string | null; ques
 	return { body, question: alt ?? texts[0]?.slice(0, 240) ?? "互動訊息" };
 }
 
-/** 解析 postback data；不是我們送出的格式就回 null */
+/** 解析 postback data；不是本系統發送的格式就回 null */
 export function parsePromptPostback(
 	data: string,
 ): { promptId: string; choice: string } | null {
@@ -455,7 +455,7 @@ export class LineClient {
 	}
 }
 
-/** LINE 對每則送出的訊息回的識別資料；quoteToken 讓我方之後可以引用這則訊息 */
+/** LINE 對每則發送的訊息回的識別資料；quoteToken 讓本系統之後可以引用這則訊息 */
 export interface LineSentMessage {
 	id: string;
 	quoteToken?: string;

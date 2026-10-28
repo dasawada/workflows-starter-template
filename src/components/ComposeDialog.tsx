@@ -49,9 +49,9 @@ export function ComposeDialog({ onClose, onSend, initialMessages, onBackToBuilde
 	const parsed = useMemo<{ messages: unknown[] | null; error: string | null }>(() => {
 		try {
 			const value: unknown = JSON.parse(text);
-			if (!Array.isArray(value)) return { messages: null, error: "最外層必須是陣列 [ ... ]" };
-			if (value.length === 0) return { messages: null, error: "至少要有一則訊息" };
-			if (value.length > 5) return { messages: null, error: "一次最多 5 則訊息" };
+			if (!Array.isArray(value)) return { messages: null, error: "最外層必須是陣列（[ ]）。" };
+			if (value.length === 0) return { messages: null, error: "至少需要一則訊息。" };
+			if (value.length > 5) return { messages: null, error: "一次最多發送 5 則訊息。" };
 			return { messages: value, error: null };
 		} catch (err) {
 			return { messages: null, error: `JSON 格式錯誤：${err instanceof Error ? err.message : String(err)}` };
@@ -88,7 +88,7 @@ export function ComposeDialog({ onClose, onSend, initialMessages, onBackToBuilde
 			await onSend({ messages: parsed.messages, templateKey: presetKey, allowChange });
 			onClose();
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "發送失敗");
+			setError(err instanceof Error ? err.message : "發送失敗。請稍後再試。");
 		} finally {
 			setSending(false);
 		}
@@ -140,7 +140,7 @@ export function ComposeDialog({ onClose, onSend, initialMessages, onBackToBuilde
 
 				{preset && (
 					<p className="px-5 py-2 text-[11px] text-neutral-500 dark:text-neutral-400 border-b border-neutral-100 dark:border-neutral-800">
-						{preset.hint}{" "}postback 的 <code>data</code> 只需填入選項值，發送時會自動加上追蹤 id。
+						{preset.hint}{" "}postback 的 <code>data</code> 只需填入選項值，發送時會自動加上追蹤 ID。
 					</p>
 				)}
 
@@ -190,7 +190,7 @@ export function ComposeDialog({ onClose, onSend, initialMessages, onBackToBuilde
 						disabled={sending || !parsed.messages}
 						className="text-sm font-medium px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white"
 					>
-						{sending ? "發送中…" : "發送"}
+						{sending ? "發送中" : "發送"}
 					</button>
 				</div>
 			</div>

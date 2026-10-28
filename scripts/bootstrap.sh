@@ -18,9 +18,9 @@ echo "== D1: $DB_NAME"
 DB_ID=$(npx wrangler d1 list --json | json_field uuid "$DB_NAME")
 if [ -z "$DB_ID" ]; then
   npx wrangler d1 create "$DB_NAME" || {
-    echo "!! 無法建立 D1，請在 dashboard（Storage & Databases → D1）手動建立名為 $DB_NAME 的資料庫後重試"; exit 1; }
+    echo "!! 無法建立 D1，請在 dashboard（Storage & Databases → D1）手動建立名為 $DB_NAME 的資料庫後重試。"; exit 1; }
   DB_ID=$(npx wrangler d1 list --json | json_field uuid "$DB_NAME")
-  [ -n "$DB_ID" ] || { echo "!! 建立後仍查不到 $DB_NAME 的 id"; exit 1; }
+  [ -n "$DB_ID" ] || { echo "!! 建立後仍查不到 $DB_NAME 的 ID。"; exit 1; }
   echo "   已建立 $DB_ID"
 else
   echo "   已存在 $DB_ID"
@@ -40,7 +40,7 @@ if npx wrangler r2 bucket list 2>/dev/null | grep -Eq "^name: *$BUCKET_NAME\$|^$
   echo "   已存在"
 else
   npx wrangler r2 bucket create "$BUCKET_NAME" || {
-    echo "!! 無法建立 R2，請在 dashboard（R2 Object Storage）手動建立名為 $BUCKET_NAME 的 bucket 後重試"; exit 1; }
+    echo "!! 無法建立 R2，請在 dashboard（R2 Object Storage）手動建立名為 $BUCKET_NAME 的 bucket 後重試。"; exit 1; }
 fi
 
 echo "== Queues: cs-console-line-events（需 Workers Paid）"
@@ -55,7 +55,7 @@ for Q in cs-console-line-events cs-console-line-events-dlq; do
   fi
 done
 if [ "$QUEUES_OK" = "0" ]; then
-  echo "!! 無法建立 Queues（通常是免費方案）。改以 inline 模式部署：從部署設定移除 queues 並設 WEBHOOK_MODE=inline"
+  echo "!! 無法建立 Queues（通常是免費方案）。改以 inline 模式部署：從部署設定移除 queues 並設 WEBHOOK_MODE=inline。"
   node -e '
     const fs=require("fs");
     for(const d of fs.existsSync("dist")?fs.readdirSync("dist"):[]){
@@ -78,8 +78,8 @@ echo "== 部署"
 DEPLOY_LOG=$(mktemp)
 if ! npx wrangler deploy 2>&1 | tee "$DEPLOY_LOG"; then
   if grep -q "Analytics Engine" "$DEPLOY_LOG"; then
-    echo "!! 帳號尚未啟用 Analytics Engine，改以不帶 METRICS binding 的設定重試一次（程式端會略過指標寫入）"
-    echo "   之後到 dashboard → Workers & Pages → Analytics Engine 按啟用，再重新部署即可恢復指標"
+    echo "!! 帳號尚未啟用 Analytics Engine，改以不帶 METRICS binding 的設定重試一次（程式端會略過指標寫入）。"
+    echo "   之後到 dashboard → Workers & Pages → Analytics Engine 啟用，再重新部署即可恢復指標。"
     node -e '
       const fs=require("fs");
       for(const d of fs.existsSync("dist")?fs.readdirSync("dist"):[]){

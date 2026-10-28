@@ -289,7 +289,7 @@ export function previewText(type: MessageType, text: string | null): string {
 		file: "[檔案]",
 		sticker: "[貼圖]",
 		location: "[位置]",
-		prompt: "[選擇題]",
+		prompt: "[互動訊息]",
 		rich: "[互動訊息]",
 		unknown: "[不支援的訊息]",
 	};
@@ -298,7 +298,7 @@ export function previewText(type: MessageType, text: string | null): string {
 
 /**
  * 寫入訊息並同步更新對話摘要，整個流程一次 D1 往返（batch）。
- * 使用者傳入的訊息會把對話重新打開並累加未讀；客服送出的訊息會清除「待處理」標記。
+ * 使用者傳入的訊息會把對話重新打開並累加未讀；客服發送的訊息會清除「待處理」標記。
  * 對話摘要的 UPDATE 以「這則訊息真的存在」為條件，所以 LINE 重送（INSERT 被 IGNORE）不會重複累加未讀。
  * 回傳 null 代表這則訊息（依 external_id）已經存在，屬於 LINE 重送。
  */
@@ -891,7 +891,7 @@ export async function setDeliveryStatus(
 	return row ? toMessage(row) : null;
 }
 
-/** 排程用：送出中超過一段時間還沒確認的訊息 */
+/** 排程用：發送中超過一段時間還沒確認的訊息 */
 export async function listPendingOutbound(db: D1Database, olderThan: number, limit = 50): Promise<Message[]> {
 	const { results } = await db
 		.prepare(
@@ -956,7 +956,7 @@ export async function assignConversation(
 }
 
 /**
- * 衝突偵測：客服送出時畫面上最後一則是 sinceMessageId，找出之後其他客服送出的訊息。
+ * 衝突偵測：客服發送時畫面上最後一則是 sinceMessageId，找出之後其他客服發送的訊息。
  * sinceMessageId 找不到（例如被撤回）就視為沒有基準，不擋。
  */
 export async function listAgentMessagesAfter(

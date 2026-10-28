@@ -8,7 +8,7 @@ import type {
 } from "./types";
 
 /**
- * 草稿 → LINE 訊息 JSON，以及送出前的檢查。
+ * 草稿 → LINE 訊息 JSON，以及發送前的檢查。
  * 轉換時會把超長內容裁到上限，所以輸出一定合法；validate 則把「必填沒填」之類的問題列給使用者。
  */
 
@@ -189,7 +189,7 @@ function validateAction(a: ActionDraft, where: string, push: (msg: string) => vo
 			if (!a.value.trim()) push(`${where}：選項值必填（例如 accept）`);
 			break;
 		case "message":
-			if (!a.text.trim()) push(`${where}：代使用者送出的文字必填`);
+			if (!a.text.trim()) push(`${where}：代使用者發送的文字必填`);
 			break;
 		case "uri":
 			if (!/^(https?|line|tel):/.test(a.uri.trim())) push(`${where}：網址需以 https://、line:// 或 tel: 開頭`);

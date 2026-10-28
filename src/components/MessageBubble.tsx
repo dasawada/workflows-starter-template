@@ -6,7 +6,7 @@ import { LinePreview } from "./LinePreview";
 
 interface Props {
 	message: Message;
-	/** 送出失敗／不明的客服訊息可重推 */
+	/** 發送失敗／不明的客服訊息可重推 */
 	onRetry?: (messageId: string) => void;
 	/** 客服覺得這則有問題：按驚嘆號回報，不必說明原因 */
 	onReport?: (messageId: string, note?: string) => Promise<void>;
@@ -73,7 +73,7 @@ export function MessageBubble({ message, onRetry, onReport, onQuote }: Props) {
 					{imageSet && ` · 第 ${imageSet.index}/${imageSet.total} 張`}
 					{message.editedAt && !message.unsentAt && " · 已編輯"}
 					{imported && (
-						<span title="此紀錄來自官方後台 CSV 匯入，而非即時接收的事件" className="px-1 rounded bg-neutral-200 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-300">
+						<span title="此紀錄來自官方帳號管理後台的 CSV 匯入，而非即時接收的事件。" className="px-1 rounded bg-neutral-200 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-300">
 							匯入紀錄
 						</span>
 					)}
@@ -150,7 +150,7 @@ function QuoteButton({ onClick }: { onClick: () => void }) {
 		<button
 			type="button"
 			onClick={onClick}
-			title="引用這則訊息回覆，對方在 LINE 會看到引用框"
+			title="引用此訊息回覆，使用者在 LINE 會看到引用框。"
 			aria-label="引用此訊息"
 			className="h-6 px-1.5 rounded-full text-[11px] leading-none bg-neutral-200 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-300 hover:bg-neutral-300 dark:hover:bg-neutral-600"
 		>
@@ -175,7 +175,7 @@ function ReportButton({
 	const [busy, setBusy] = useState(false);
 	if (reported) {
 		return (
-			<span className="text-[10px] text-amber-600 dark:text-amber-400" title="已回報，工程端會處理">
+			<span className="text-[10px] text-amber-600 dark:text-amber-400" title="已回報，工程端將會處理。">
 				已回報
 			</span>
 		);
@@ -192,7 +192,7 @@ function ReportButton({
 					setBusy(false);
 				}
 			}}
-			title="這則訊息有問題？按一下回報"
+			title="此訊息有異常時，按一下即可回報。"
 			aria-label="回報此訊息"
 			className="w-6 h-6 rounded-full text-xs font-semibold leading-none bg-neutral-200 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-300 hover:bg-amber-500 hover:text-white disabled:opacity-50"
 		>
@@ -207,9 +207,9 @@ function ReportButton({
 function DeliveryBadge({ message, onRetry }: { message: Message; onRetry?: (id: string) => void }) {
 	switch (message.deliveryStatus) {
 		case "sent":
-			return <span title="LINE 已接受此訊息；無法得知使用者是否已讀">· 已發送</span>;
+			return <span title="LINE 已接受此訊息。無法得知使用者是否已讀。">· 已發送</span>;
 		case "pending":
-			return <span className="text-amber-600 dark:text-amber-400" title="尚未收到 LINE 的確認，系統將自動重試">· 發送中</span>;
+			return <span className="text-amber-600 dark:text-amber-400" title="尚未收到 LINE 的確認，系統將自動重試。">· 發送中</span>;
 		case "failed":
 			return (
 				<span className="text-red-600 dark:text-red-400" title={String(message.metadata?.deliveryError ?? "")}>
@@ -223,7 +223,7 @@ function DeliveryBadge({ message, onRetry }: { message: Message; onRetry?: (id: 
 			);
 		case "unknown":
 			return (
-				<span className="text-red-600 dark:text-red-400" title="超過 24 小時仍無法確認 LINE 是否已發送，請向使用者確認">
+				<span className="text-red-600 dark:text-red-400" title="超過 24 小時仍無法確認 LINE 是否已發送，請向使用者確認。">
 					· 結果不明
 					{onRetry && (
 						<button onClick={() => onRetry(message.id)} className="ml-1 underline">
@@ -238,7 +238,7 @@ function DeliveryBadge({ message, onRetry }: { message: Message; onRetry?: (id: 
 }
 
 /**
- * 引用區塊：本地找得到原文就顯示，找不到一定要明講，客服才知道這句話是在回某則我們沒有的訊息。
+ * 引用區塊：本地找得到原文就顯示，找不到一定要明講，客服才知道這句話是在回某則本系統沒有的訊息。
  */
 function QuoteBlock({ quote, mine }: { quote: MessageQuote; mine: boolean }) {
 	const tone = mine ? "border-white/60 text-white/85" : "border-emerald-500 text-neutral-500 dark:text-neutral-400";
@@ -246,7 +246,7 @@ function QuoteBlock({ quote, mine }: { quote: MessageQuote; mine: boolean }) {
 		return (
 			<div className={`border-l-2 pl-2 mb-1.5 text-xs ${tone}`}>
 				<div className="font-medium">引用的原始訊息無法取得</div>
-				<div className="opacity-80">可能發送於串接之前，或來自未同步的訊息來源</div>
+				<div className="opacity-80">可能發送於串接之前，或來自未同步的訊息來源。</div>
 			</div>
 		);
 	}
@@ -277,12 +277,12 @@ function QuoteBlock({ quote, mine }: { quote: MessageQuote; mine: boolean }) {
 /** 附件尚未取得或已無法取得時，明確標示屬於哪一種情況 */
 function MediaPending({ message, label }: { message: Message; label: string }) {
 	if (message.mediaStatus === "expired") {
-		return <span className="italic opacity-70">{label}已逾 LINE 平台保留期限，無法取得</span>;
+		return <span className="italic opacity-70">{label}已逾 LINE 平台保留期限，無法取得。</span>;
 	}
 	if (message.mediaStatus === "failed") {
-		return <span className="italic opacity-70">{label}下載失敗，系統將再次嘗試</span>;
+		return <span className="italic opacity-70">{label}下載失敗，系統將再次嘗試。</span>;
 	}
-	return <span className="italic opacity-70">{label}下載中…</span>;
+	return <span className="italic opacity-70">{label}下載中</span>;
 }
 
 function Content({ message }: { message: Message }) {
@@ -361,10 +361,10 @@ function Content({ message }: { message: Message }) {
 			return mediaSrc ? (
 				<a href={mediaSrc} download={name} className="underline">
 					附件：{name}
-					{size && <span className="opacity-70"> ({size})</span>}
+					{size && <span className="opacity-70">（{size}）</span>}
 				</a>
 			) : (
-				<MediaPending message={message} label={`附件 ${name} `} />
+				<MediaPending message={message} label={`附件「${name}」`} />
 			);
 		}
 

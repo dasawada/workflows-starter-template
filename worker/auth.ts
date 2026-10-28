@@ -23,5 +23,5 @@ export function isAuthorized(request: Request, env: Env): boolean {
 }
 
 export function unauthorized(): Response {
-	return Response.json({ error: "Unauthorized" }, { status: 401 });
+	return Response.json({ error: "密鑰不正確或已失效。請重新登入。" }, { status: 401 });
 }

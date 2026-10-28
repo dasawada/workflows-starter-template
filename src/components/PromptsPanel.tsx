@@ -84,7 +84,7 @@ export function PromptsPanel({ prompts, loading, onRefresh, onOpenConversation, 
 
 			<div className="flex-1 overflow-auto bg-neutral-50 dark:bg-neutral-950">
 				{loading && prompts.length === 0 && (
-					<p className="p-6 text-sm text-neutral-500 text-center">載入中…</p>
+					<p className="p-6 text-sm text-neutral-500 text-center">載入中</p>
 				)}
 				{!loading && prompts.length === 0 && (
 					<p className="p-6 text-sm text-neutral-500 text-center">尚無可追蹤訊息的發送紀錄</p>
@@ -125,7 +125,7 @@ export function PromptsPanel({ prompts, loading, onRefresh, onOpenConversation, 
 										</div>
 									</td>
 									<td className="px-3 py-2 whitespace-nowrap">
-										{p.allowChange && <span className="mr-1 text-[10px] text-neutral-400" title="允許變更，以最後一次選擇為準">可變更</span>}
+										{p.allowChange && <span className="mr-1 text-[10px] text-neutral-400" title="允許變更，以最後一次選擇為準。">可變更</span>}
 										{p.status === "answered" ? (
 											<span
 												className={`px-1.5 py-0.5 rounded font-medium ${
