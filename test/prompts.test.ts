@@ -1,10 +1,6 @@
 import { SELF, env, introspectWorkflow } from "cloudflare:test";
 import { afterAll, afterEach, beforeAll, describe, it, expect, vi } from "vitest";
-import {
-	buildPromptMessages,
-	parsePromptPostback,
-	signLineBody,
-} from "../worker/line";
+import { parsePromptPostback, signLineBody } from "../worker/line";
 import type { Message, Prompt } from "../shared/types";
 
 const AUTH = { Authorization: `Bearer ${env.CONSOLE_TOKEN}` };
@@ -74,34 +70,9 @@ async function seedUser(userId: string, name: string) {
 	]);
 }
 
-describe("buildPromptMessages / parsePromptPostback", () => {
-	it("builds text + confirm template with postback actions", () => {
-		const messages = buildPromptMessages({
-			promptId: "p1",
-			body: "正文",
-			question: "是否承接？",
-			options: [
-				{ label: "是", value: "yes" },
-				{ label: "否", value: "no" },
-			],
-		}) as Array<Record<string, unknown>>;
-		expect(messages).toHaveLength(2);
-		expect(messages[0]).toEqual({ type: "text", text: "正文" });
-		const template = messages[1].template as { type: string; text: string; actions: Array<Record<string, string>> };
-		expect(template.type).toBe("confirm");
-		expect(template.actions[0]).toMatchObject({ type: "postback", label: "是", displayText: "是" });
-		expect(parsePromptPostback(template.actions[0].data)).toEqual({ promptId: "p1", choice: "yes" });
-		expect(parsePromptPostback(template.actions[1].data)).toEqual({ promptId: "p1", choice: "no" });
-	});
-
-	it("omits the text message when body is empty", () => {
-		const messages = buildPromptMessages({
-			promptId: "p2",
-			body: "",
-			question: "Q",
-			options: [{ label: "OK", value: "ok" }],
-		});
-		expect(messages).toHaveLength(1);
+describe("parsePromptPostback", () => {
+	it("parses tracked postback data", () => {
+		expect(parsePromptPostback("prompt=p1&choice=yes")).toEqual({ promptId: "p1", choice: "yes" });
 	});
 
 	it("rejects foreign postback data", () => {
@@ -119,27 +90,32 @@ describe("trackable prompts", () => {
 			return Response.json({});
 		});
 
-		const send = await SELF.fetch(
-			"https://console.test/api/conversations/line%3AU-teacher/prompt",
-			{
-				method: "POST",
-				headers: { ...AUTH, "Content-Type": "application/json" },
-				body: JSON.stringify({
-					body: "老師好，媒合到【小明】「數學」",
-					question: "請問老師是否方便承接？",
-					options: [
-						{ label: "是", value: "yes" },
-						{ label: "否", value: "no" },
-					],
-					templateKey: "course-offer",
-					variables: { 學生姓名: "小明", 科目: "數學" },
-				}),
-			},
-		);
+		const send = await SELF.fetch("https://console.test/api/conversations/line%3AU-teacher/send", {
+			method: "POST",
+			headers: { ...AUTH, "Content-Type": "application/json" },
+			body: JSON.stringify({
+				templateKey: "course-offer",
+				messages: [
+					{ type: "text", text: "老師好，媒合到【小明】「數學」" },
+					{
+						type: "template",
+						altText: "請問老師是否方便承接？",
+						template: {
+							type: "confirm",
+							text: "請問老師是否方便承接？",
+							actions: [
+								{ type: "postback", label: "是", data: "yes", displayText: "是" },
+								{ type: "postback", label: "否", data: "no", displayText: "否" },
+							],
+						},
+					},
+				],
+			}),
+		});
 		expect(send.status).toBe(200);
 		const { prompt, message } = (await send.json()) as { prompt: Prompt; message: Message };
 		expect(prompt.status).toBe("pending");
-		expect(prompt.variables).toEqual({ 學生姓名: "小明", 科目: "數學" });
+		expect(prompt.templateKey).toBe("course-offer");
 		expect(message.type).toBe("prompt");
 		expect(pushed!.to).toBe("U-teacher");
 		expect(pushed!.messages).toHaveLength(2);
@@ -279,32 +255,6 @@ describe("trackable prompts", () => {
 			},
 		]);
 		expect(res.status).toBe(200);
-	});
-
-	it("validates input", async () => {
-		await seedUser("U-val", "驗證");
-		const bad = await SELF.fetch(
-			"https://console.test/api/conversations/line%3AU-val/prompt",
-			{
-				method: "POST",
-				headers: { ...AUTH, "Content-Type": "application/json" },
-				body: JSON.stringify({ question: "", options: [] }),
-			},
-		);
-		expect(bad.status).toBe(400);
-
-		const tooMany = await SELF.fetch(
-			"https://console.test/api/conversations/line%3AU-val/prompt",
-			{
-				method: "POST",
-				headers: { ...AUTH, "Content-Type": "application/json" },
-				body: JSON.stringify({
-					question: "Q",
-					options: [{ label: "A" }, { label: "B" }, { label: "C" }],
-				}),
-			},
-		);
-		expect(tooMany.status).toBe(400);
 	});
 });
 

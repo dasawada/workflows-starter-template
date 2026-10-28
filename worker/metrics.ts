@@ -23,21 +23,3 @@ export function recordMetric(env: Env, point: MetricPoint): void {
 		// 指標不能影響主流程
 	}
 }
-
-/** 量測一段非同步工作的耗時與結果，記成 name 指標：labels = [...labels, outcome]，values = [ms] */
-export async function timed<T>(
-	env: Env,
-	name: string,
-	labels: (string | null | undefined)[],
-	fn: () => Promise<T>,
-): Promise<T> {
-	const start = Date.now();
-	try {
-		const result = await fn();
-		recordMetric(env, { name, labels: [...labels, "ok"], values: [Date.now() - start] });
-		return result;
-	} catch (err) {
-		recordMetric(env, { name, labels: [...labels, "error"], values: [Date.now() - start] });
-		throw err;
-	}
-}

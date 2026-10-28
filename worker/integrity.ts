@@ -1,4 +1,4 @@
-import type { IntegrityHealth, IntegrityKind, IntegritySeverity, LineBotInfo } from "../shared/types";
+import type { IntegrityHealth, LineBotInfo } from "../shared/types";
 import {
 	getIntegrityCounts,
 	getSystemState,
@@ -10,7 +10,6 @@ import {
 	upsertIntegrityEvent,
 	type NewIntegrityEvent,
 } from "./db";
-import { inboxStub } from "./inbox-do";
 import { lineClientFor } from "./line-env";
 import { storeMedia } from "./media";
 import { pushOutboundMessage } from "./outbox";
@@ -38,13 +37,12 @@ export async function recordIntegrity(
 	input: Omit<NewIntegrityEvent, "id" | "createdAt"> & { id?: string; createdAt?: number },
 ): Promise<void> {
 	try {
-		const event = await upsertIntegrityEvent(env.DB, {
+		await upsertIntegrityEvent(env.DB, {
 			...input,
 			id: input.id ?? crypto.randomUUID(),
 			createdAt: input.createdAt ?? Date.now(),
 		});
 		recordMetric(env, { name: "integrity.event", labels: [input.kind, input.severity], values: [1] });
-		await inboxStub(env).broadcast({ type: "integrity.updated", event });
 	} catch (err) {
 		// 缺口紀錄本身失敗不能影響主流程，但要留 log
 		console.error("record integrity event failed", input.kind, err);
@@ -53,23 +51,9 @@ export async function recordIntegrity(
 
 export async function resolveIntegrity(env: Env, dedupeKey: string, resolution: string): Promise<void> {
 	try {
-		const event = await resolveIntegrityByDedupeKey(env.DB, dedupeKey, resolution);
-		if (event) await inboxStub(env).broadcast({ type: "integrity.updated", event });
+		await resolveIntegrityByDedupeKey(env.DB, dedupeKey, resolution);
 	} catch (err) {
 		console.error("resolve integrity event failed", dedupeKey, err);
-	}
-}
-
-export function severityOf(kind: IntegrityKind): IntegritySeverity {
-	switch (kind) {
-		case "event_dead_lettered":
-		case "send_unknown":
-		case "media_expired":
-			return "error";
-		case "import":
-			return "info";
-		default:
-			return "warning";
 	}
 }
 

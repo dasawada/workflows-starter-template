@@ -386,10 +386,10 @@ describe("integrity center", () => {
 
 	it("records when the account's chat mode makes LINE auto-read", async () => {
 		mockLine("GET", "/v2/bot/info", lineJson({ userId: "Ubot", basicId: "@shop", displayName: "商店", chatMode: "bot", markAsReadMode: "auto" }));
-		await SELF.fetch("https://console.test/api/line/info", { headers: AUTH });
+		await SELF.fetch("https://console.test/api/integrity/maintenance", { method: "POST", headers: AUTH });
 		expect((await openEvents("chat_mode")).length).toBe(1);
 		mockLine("GET", "/v2/bot/info", lineJson({ userId: "Ubot", basicId: "@shop", displayName: "商店", chatMode: "chat", markAsReadMode: "manual" }));
-		await SELF.fetch("https://console.test/api/line/info", { headers: AUTH });
+		await SELF.fetch("https://console.test/api/integrity/maintenance", { method: "POST", headers: AUTH });
 		expect((await openEvents("chat_mode")).length).toBe(0);
 		const health = (await (await SELF.fetch("https://console.test/api/integrity/health", { headers: AUTH })).json()) as IntegrityHealth;
 		expect(health.botInfo?.markAsReadMode).toBe("manual");

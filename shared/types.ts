@@ -176,14 +176,6 @@ export interface Stats {
 	needsAttentionCount: number;
 }
 
-export interface SendPromptInput {
-	body?: string;
-	question: string;
-	options: PromptOption[];
-	templateKey?: string;
-	variables?: Record<string, string>;
-}
-
 // ---------- 對話完整性 ----------
 
 export type IntegrityKind =
@@ -234,14 +226,6 @@ export interface IntegrityHealth {
 	outbound: { pending: number; failed: number; unknown: number };
 	media: { pending: number; failed: number; expired: number };
 	importsUnmatched: number;
-}
-
-export interface IntegrityReportInput {
-	conversationId: string;
-	note: string;
-	/** 客服認為缺漏發生的大概時間 */
-	from?: number;
-	to?: number;
 }
 
 // ---------- 歷史匯入 ----------
@@ -361,7 +345,6 @@ export type InboxEvent =
 	| { type: "conversation.updated"; conversation: Conversation }
 	| { type: "prompt.updated"; prompt: Prompt }
 	| { type: "presence.updated"; conversationId: string; agents: string[] }
-	| { type: "integrity.updated"; event: IntegrityEvent }
 	| { type: "notification.updated"; notification: Notification };
 
 export interface ConversationListResponse {

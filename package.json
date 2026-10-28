@@ -1,21 +1,6 @@
 {
 	"name": "cs-console",
 	"description": "LINE 客服訊息收發台（Cloudflare Workers + D1 + R2 + Durable Objects + Workflows）",
-	"cloudflare": {
-		"label": "Workflows Starter",
-		"products": [
-			"Workers",
-			"Workflows",
-			"Durable Objects"
-		],
-		"categories": [
-			"starter"
-		],
-		"publish": true,
-		"preview_image_url": "https://imagedelivery.net/wSMYJvS3Xw-n339CbDyDIA/4380d39a-b907-437c-e784-500fcc10cb00/preview",
-		"preview_icon_url": "https://imagedelivery.net/wSMYJvS3Xw-n339CbDyDIA/6d6e9a49-5c10-4ef6-bfa8-b6577a656300/public",
-		"docs_url": "https://developers.cloudflare.com/workflows/"
-	},
 	"dependencies": {
 		"react": "19.2.1",
 		"react-dom": "19.2.1"

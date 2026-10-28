@@ -44,9 +44,9 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 | `worker/db.ts` | 所有 SQL 集中於此 |
 | `worker/inbox-do.ts` | 單一實例 `InboxDO`（名稱固定 `"inbox"`），WebSocket 廣播 |
 | `worker/workflow.ts` | `ReplyReminderWorkflow` 逾時提醒 |
-| `worker/metrics.ts` | Analytics Engine 指標（`recordMetric` / `timed`），寫入失敗一律吞掉 |
+| `worker/metrics.ts` | Analytics Engine 指標 `recordMetric`，寫入失敗一律吞掉 |
 | `worker/outbox.ts` | 客服發訊唯一入口 `sendOutbound`：先寫 D1（pending）再帶 `X-Line-Retry-Key` 推送；`detectConflict` 做接手／後到回覆的 409 |
-| `worker/integrity.ts` | 缺口紀錄 `recordIntegrity`（dedupeKey 合併計數）、健康狀態、`runMaintenance`（cron 每 5 分鐘與 `POST /api/integrity/maintenance`）。**客服台不顯示這些**；工程端用 `npm run reports`（`scripts/reports.mjs`，直接讀正式 D1）每天讀取與結案 |
+| `worker/integrity.ts` | 缺口紀錄 `recordIntegrity`（dedupeKey 合併計數）、健康狀態、`runMaintenance`（cron 每 5 分鐘與 `POST /api/integrity/maintenance`）。**客服台不顯示這些**；工程端用 `npm run reports`（`scripts/reports.mjs`，直接讀正式 D1）每天讀取與結案；只有 token 時用 `/api/integrity/health`（健檢）、`/events`、`/resolve`、`/maintenance`（修復） |
 | `worker/media.ts` | 附件下載 `storeMedia`：404/410 → expired 記缺口；其他失敗 → failed 由排程重試到 5 次 |
 | `worker/import-csv.ts` | 官方後台 CSV：解析、欄位偵測、名稱配對、冪等寫入、未配對列指派 |
 | `worker/pnp.ts` | 通知型訊息：電話號碼只存 SHA-256 與遮罩，`X-Line-Delivery-Tag` = notification id |
@@ -66,6 +66,7 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 ## 慣例
 
 - TypeScript 開了 `erasableSyntaxOnly`：不能用 constructor 參數屬性、enum、namespace。
+- 移除功能時以「呼叫端」為單位清乾淨：前端畫面、`src/api.ts`、後端路由、`shared/types.ts` 的型別與 WebSocket 事件、測試、README／CLAUDE.md／`docs/` 一起改；改完以 `grep` 確認沒有殘留引用。
 - 縮排用 tab。回覆與註解用繁體中文，識別字用英文。
 - 使用者看得到的文案（前端、後端回傳的錯誤與系統訊息、完整性事件標題）一律正式書面語：不用口語（拿、塞、搞、看看、～）、不用表情符號、量詞用「個」「張卡片」「則」、對使用者稱「您」、提示句以句號結尾。
 - 新增渠道（如 Teams）時：新增 `worker/<channel>.ts` 與 `worker/webhook-<channel>.ts`，資料寫入仍走 `db.ts`，`channel` 欄位填對應值，`handleReply` 依 `channel` 分派。
@@ -119,6 +120,6 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 - 一般回覆（`/reply`）只能純文字（可帶引用）；Flex 等互動訊息走 `/send`；客服上傳圖片尚未做。
 - LINE 按鈕可反覆按：`recordPromptResponse` 每次都寫 `prompt_responses`，但只有第一次（或 `allow_change = 1`）會更新 `prompts` 的結果；重複按會回覆「以第一次回覆為準」。
 - 對話完整性（migration 0005）：`quotedMessageId` 在收訊時以 `findMessageByExternalId` 做快照存進 `metadata.quote`，找不到原文時 `messageId: null`，前端明示「無法取得」；`unsend` 清掉 text／media／R2 物件並設 `unsent_at`；`messageEdited`（目前僅群組文字訊息）以同一個 LINE message id 更新 text、第一版留在 `metadata.originalText`，只接受 timestamp 較新的版本；`imageSet`、`senderUserId`、`isRedelivery` 原樣存 metadata。
-- 已讀：使用者訊息的 `markAsReadToken` 存在 `conversations.mark_as_read_token`，客服 `POST /read` 時呼叫 `POST /v2/bot/chat/markAsRead`，成功才清掉 token。只有官方帳號 Chat 開啟（`GET /api/line/info` 的 `markAsReadMode = manual`）才有效，Chat 關閉時 LINE 回 400、客服台照常。`messageEdited` 的事件結構與 `markAsReadToken` 的位置是依文件寫的，正式環境第一次收到時用 `npx wrangler tail` 核對。
+- 已讀：使用者訊息的 `markAsReadToken` 存在 `conversations.mark_as_read_token`，客服 `POST /read` 時呼叫 `POST /v2/bot/chat/markAsRead`，成功才清掉 token。只有官方帳號 Chat 開啟（`GET /api/integrity/health` 的 `botInfo.markAsReadMode = manual`）才有效，Chat 關閉時 LINE 回 400、客服台照常。`messageEdited` 的事件結構與 `markAsReadToken` 的位置是依文件寫的，正式環境第一次收到時用 `npx wrangler tail` 核對。
 - 互動訊息編輯台只產生五種受控版型（text / confirm / buttons / carousel / 固定版面的 Flex 資訊卡），不開放自由 Flex；新版型要先在 `types.ts` 加草稿型別、`toLine.ts` 加轉換與檢查、`MessageForm.tsx` 加表單，並在 `test/builder.test.ts` 加測試。
-- 互動訊息：`POST /api/conversations/:id/send` 接任意 LINE 訊息陣列；`worker/line.ts` 的 `instrumentPostbacks` 會把所有 postback 的 data 改寫成 `prompt=<id>&choice=<原 data 或 label>` 並萃取選項，有 postback 才建立 `prompts` 紀錄（message type `prompt`），否則 type `rich`。使用者點選後 `worker/webhook-line.ts` 的 `handlePostback` 寫入 `prompts` / `prompt_responses`。`/prompt` 是舊介面，內部也走同一條 `sendTracked`。
+- 互動訊息：`POST /api/conversations/:id/send` 接任意 LINE 訊息陣列；`worker/line.ts` 的 `instrumentPostbacks` 會把所有 postback 的 data 改寫成 `prompt=<id>&choice=<原 data 或 label>` 並萃取選項，有 postback 才建立 `prompts` 紀錄（message type `prompt`），否則 type `rich`。使用者點選後 `worker/webhook-line.ts` 的 `handlePostback` 寫入 `prompts` / `prompt_responses`。舊的 `/prompt` 介面已移除，一律走 `/send`。

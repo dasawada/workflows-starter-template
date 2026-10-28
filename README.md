@@ -57,7 +57,7 @@
 1. **Messaging API → Webhook URL** 填 `https://<worker 網址>/webhook/line`，按 Verify，開啟 **Use webhook**。
 2. 關閉 **Auto-reply messages**（否則官方帳號的自動回應會搶先回覆）。
 3. 關閉 **Greeting message**（由 `WELCOME_MESSAGE` 取代；要用 LINE 內建的就把 `WELCOME_MESSAGE` 留空）。
-4. 要讓使用者看到「已讀」，官方帳號管理後台的 **Chat（聊天）必須開啟**。目前的 `chatMode`／`markAsReadMode` 可由 `GET /api/line/info` 確認。
+4. 要讓使用者看到「已讀」，官方帳號管理後台的 **Chat（聊天）必須開啟**。目前的 `chatMode`／`markAsReadMode` 可由 `GET /api/integrity/health` 的 `botInfo` 確認（每 5 分鐘刷新）。
 5. 通知型訊息（PNP）需另外向 LINE 申請；未開通時發送會失敗並顯示原因。
 
 打開 worker 網址，輸入客服名稱與 `CONSOLE_TOKEN` 登入。
@@ -104,6 +104,8 @@ npm run reports -- --kind agent_report   # 只看某一類
 npm run reports -- --resolve <id> "處理說明"
 ```
 
+不想登入 Cloudflare 時，同樣的健檢與修復可用 `CONSOLE_TOKEN` 呼叫 `/api/integrity/*`（見下方 API）。
+
 ## API
 
 所有 `/api/*` 與 `/ws` 需要 `Authorization: Bearer <CONSOLE_TOKEN>`（WebSocket 用 `?token=`）。前端另以 `X-Agent-Name`（URI 編碼）帶客服名稱，只用於協作顯示，不是身分驗證。完整型別見 `shared/types.ts`。
@@ -120,7 +122,6 @@ npm run reports -- --resolve <id> "處理說明"
 | GET | `/api/conversations/:id/messages?before=&limit=` | 訊息（舊→新） |
 | POST | `/api/conversations/:id/reply` | `{ text, clientKey?, lastSeenMessageId?, force?, quoteMessageId? }`；衝突回 409、LINE 拒絕回 502 |
 | POST | `/api/conversations/:id/send` | `{ messages: [LINE 訊息…], templateKey?, allowChange?, clientKey?, … }` 最多 5 則，postback 自動追蹤 |
-| POST | `/api/conversations/:id/prompt` | 舊介面：`{ body?, question, options: [{label,value}] }`，內部同 `/send` |
 | POST | `/api/conversations/:id/read` | 清除未讀並通知 LINE 已讀 |
 | POST | `/api/conversations/:id/status` | `{ status: "open" \| "closed" }` |
 | POST | `/api/conversations/:id/assign`、`/release` | 接手（`{ agent? }`）／交還 |
@@ -129,9 +130,8 @@ npm run reports -- --resolve <id> "處理說明"
 | POST | `/api/messages/:id/report` | 回報異常（`{ note? }` 選填），伺服器自動收齊上下文 |
 | GET | `/api/prompts?status=all\|pending\|answered&conversationId=` | 互動訊息與使用者的選擇 |
 | GET | `/api/media/:key` | R2 附件 |
-| GET | `/api/line/info` | 官方帳號資訊（`chatMode`／`markAsReadMode`） |
 
-**匯入、通知、工程端**
+**匯入、通知、工程端健檢與修復**
 
 | 方法 | 路徑 | 說明 |
 | --- | --- | --- |
@@ -141,10 +141,10 @@ npm run reports -- --resolve <id> "處理說明"
 | POST | `/api/imports/:id/assign`、`/skip` | 指派到對話／略過 |
 | GET／POST | `/api/notifications` | 通知型訊息紀錄／發送 |
 | POST | `/api/notifications/:id/retry` | 重新發送 |
-| GET | `/api/integrity/health` | 同步健康狀態 |
+| GET | `/api/integrity/health` | 同步健康狀態快照：webhook 模式與最後收到時間、待送／失敗訊息數、附件狀態、未處理缺口數、官方帳號 Chat 設定 |
 | GET | `/api/integrity/events?status=&kind=` | 缺口與回報紀錄 |
 | POST | `/api/integrity/events/:id/resolve` | 結案 |
-| POST | `/api/integrity/maintenance` | 立即執行排程維護 |
+| POST | `/api/integrity/maintenance` | 立即執行排程維護（補推、補抓附件、刷新官方帳號設定） |
 
 ## 規模與效能
 

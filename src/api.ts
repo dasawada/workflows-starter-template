@@ -8,7 +8,6 @@ import type {
 	ImportPreview,
 	ImportRowGroup,
 	ImportRunInput,
-	LineBotInfo,
 	Message,
 	MessageListResponse,
 	Notification,
@@ -18,7 +17,6 @@ import type {
 	ReplyInput,
 	SendMessagesInput,
 	SendNotificationInput,
-	SendPromptInput,
 	Stats,
 } from "../shared/types";
 import { getAgentName } from "./agent";
@@ -117,7 +115,6 @@ export const api = {
 			method: "POST",
 			body: JSON.stringify({ note }),
 		}),
-	lineInfo: () => request<LineBotInfo>("/api/line/info"),
 
 	// ---------- 歷史匯入 ----------
 	previewImport: (csv: string, mapping?: ImportMapping) =>
@@ -145,11 +142,6 @@ export const api = {
 	retryNotification: (id: string) =>
 		request<{ notification: Notification }>(`/api/notifications/${encodeURIComponent(id)}/retry`, { method: "POST" }),
 
-	sendPrompt: (conversationId: string, input: SendPromptInput) =>
-		request<{ prompt: Prompt; message: Message; conversation: Conversation }>(
-			`/api/conversations/${encodeURIComponent(conversationId)}/prompt`,
-			{ method: "POST", body: JSON.stringify(input) },
-		),
 
 	sendMessages: (conversationId: string, input: SendMessagesInput) =>
 		request<{ prompt: Prompt | null; message: Message; conversation: Conversation }>(

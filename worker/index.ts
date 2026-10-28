@@ -8,7 +8,6 @@ import { recordMetric } from "./metrics";
 import { inboxStub } from "./inbox-do";
 import {
 	TEXT_MESSAGE_MAX,
-	buildPromptMessages,
 	conversationTarget,
 	instrumentPostbacks,
 	summarizeMessages,
@@ -40,7 +39,7 @@ import {
 	setConversationStatus,
 	setReminderInstanceId,
 } from "./db";
-import { getHealth, recordIntegrity, refreshBotInfo, runMaintenance } from "./integrity";
+import { getHealth, recordIntegrity, runMaintenance } from "./integrity";
 import { pushOutboundMessage, sendOutbound, type OutboundInput } from "./outbox";
 import { assignImportRows, previewImport, runImport, skipImportRows } from "./import-csv";
 import { retryNotification, sendNotification } from "./pnp";
@@ -51,12 +50,10 @@ import type {
 	ImportRunInput,
 	IntegrityKind,
 	IntegrityStatus,
-	PromptOption,
 	PromptStatus,
 	ReplyInput,
 	SendMessagesInput,
 	SendNotificationInput,
-	SendPromptInput,
 } from "../shared/types";
 
 /**
@@ -68,7 +65,6 @@ import type {
  * - GET  /api/stats                         未讀總數等
  * - GET  /api/conversations/:id/messages    訊息（?before=<ts>&limit=）
  * - POST /api/conversations/:id/reply       客服回覆 { text, clientKey?, lastSeenMessageId?, force? }
- * - POST /api/conversations/:id/prompt      送可追蹤的選擇題 { body?, question, options[] }
  * - POST /api/conversations/:id/send        直接送 LINE 訊息陣列 { messages[] }，postback 自動追蹤
  * - POST /api/conversations/:id/assign      接手 { agent? }；/release 交還
  * - GET  /api/conversations/:id/presence    正在看這個對話的客服
@@ -78,10 +74,11 @@ import type {
  * - POST /api/conversations/:id/read        清除未讀（並通知 LINE 已讀）
  * - POST /api/conversations/:id/status      { status: "open" | "closed" }
  * - GET  /api/media/:key                    R2 媒體
- * - GET  /api/line/info                     官方帳號資訊（chatMode / markAsReadMode），確認已讀模式設定
- * - GET  /api/integrity/health              同步健康狀態（工程端用，客服台不顯示）
- * - GET  /api/integrity/events?status=&kind= 缺口與回報紀錄；POST /api/integrity/events/:id/resolve（scripts/reports.mjs 用）
- * - POST /api/integrity/maintenance         立即執行排程維護
+ * 工程端健檢與修復（只需 CONSOLE_TOKEN，不需登入 Cloudflare；客服台不使用）：
+ * - GET  /api/integrity/health              同步健康狀態快照（webhook、送達、附件、官方帳號 Chat 設定）
+ * - GET  /api/integrity/events?status=&kind= 缺口與回報紀錄；POST /api/integrity/events/:id/resolve 結案
+ * - POST /api/integrity/maintenance         立即執行排程維護（補推、補抓附件、刷新官方帳號設定）
+ *   （npm run reports 是同一批資料的另一個入口，經 wrangler 直接讀寫正式 D1）
  * - POST /api/imports/preview               CSV 欄位偵測與配對預覽 { csv, mapping? }
  * - POST /api/imports                       執行匯入；GET /api/imports 歷史批次
  * - GET  /api/imports/:id/rows              未配對的列（依名稱分組）；POST /api/imports/:id/assign、/skip
@@ -202,15 +199,6 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 		return Response.json(await getStats(env.DB));
 	}
 
-	if (pathname === "/api/line/info" && request.method === "GET") {
-		if (!env.LINE_CHANNEL_ACCESS_TOKEN) {
-			return Response.json({ error: "LINE_CHANNEL_ACCESS_TOKEN not configured" }, { status: 500 });
-		}
-		const info = await refreshBotInfo(env);
-		if (!info) return Response.json({ error: "LINE bot info unavailable" }, { status: 502 });
-		return Response.json(info);
-	}
-
 	if (pathname === "/api/prompts" && request.method === "GET") {
 		const status = (url.searchParams.get("status") ?? "all") as PromptStatus | "all";
 		const conversationId = url.searchParams.get("conversationId") ?? undefined;
@@ -218,7 +206,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 		return Response.json({ prompts });
 	}
 
-	// ---------- 完整性中心 ----------
+	// ---------- 工程端健檢與修復 ----------
 	if (pathname === "/api/integrity/health" && request.method === "GET") {
 		return Response.json(await getHealth(env));
 	}
@@ -235,7 +223,6 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 		const body = await readJson<{ resolution?: string }>(request);
 		const event = await resolveIntegrityEvent(env.DB, resolveMatch[1], body.resolution?.trim() || null, agentNameOf(request));
 		if (!event) return Response.json({ error: "Not found" }, { status: 404 });
-		await inboxStub(env).broadcast({ type: "integrity.updated", event });
 		return Response.json({ event });
 	}
 	if (pathname === "/api/integrity/maintenance" && request.method === "POST") {
@@ -371,7 +358,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 	}
 
 	const convMatch = pathname.match(
-		/^\/api\/conversations\/([^/]+)\/(messages|reply|read|status|prompt|send|assign|release|presence)$/,
+		/^\/api\/conversations\/([^/]+)\/(messages|reply|read|status|send|assign|release|presence)$/,
 	);
 	if (convMatch) {
 		const conversationId = decodeURIComponent(convMatch[1]);
@@ -447,10 +434,6 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 
 		if (action === "reply" && request.method === "POST") {
 			return handleReply(request, env, conversation);
-		}
-
-		if (action === "prompt" && request.method === "POST") {
-			return handleSendPrompt(request, env, conversation);
 		}
 
 		if (action === "send" && request.method === "POST") {
@@ -553,48 +536,6 @@ async function finishReminder(env: Env, conversationId: string): Promise<void> {
 	await setReminderInstanceId(env.DB, conversationId, null);
 }
 
-function normalizeOptions(raw: unknown): PromptOption[] | null {
-	if (!Array.isArray(raw) || raw.length < 1 || raw.length > 2) return null;
-	const options: PromptOption[] = [];
-	for (const item of raw) {
-		const label = typeof item?.label === "string" ? item.label.trim() : "";
-		const value = typeof item?.value === "string" ? item.value.trim() : label;
-		if (!label || !value || label.length > 20 || value.length > 50) return null;
-		options.push({ label, value });
-	}
-	if (new Set(options.map((o) => o.value)).size !== options.length) return null;
-	return options;
-}
-
-/**
- * 送出可追蹤的選擇題：正文（選填）+ Confirm 按鈕。舊介面，內部轉成訊息陣列走 sendTracked。
- */
-async function handleSendPrompt(request: Request, env: Env, conversation: Conversation): Promise<Response> {
-	const input = await readJson<SendPromptInput & SendMessagesInput>(request);
-	const question = input.question?.trim();
-	const body = input.body?.trim() || null;
-	const options = normalizeOptions(input.options);
-
-	if (!question) return Response.json({ error: "question is required" }, { status: 400 });
-	if (question.length > 240) return Response.json({ error: "question too long (max 240)" }, { status: 400 });
-	if (body && body.length > TEXT_MESSAGE_MAX) return Response.json({ error: "body too long (max 5000)" }, { status: 400 });
-	if (!options) return Response.json({ error: "options must be 1-2 items with label/value" }, { status: 400 });
-
-	const variables =
-		input.variables && typeof input.variables === "object"
-			? Object.fromEntries(Object.entries(input.variables).filter(([, v]) => typeof v === "string"))
-			: null;
-
-	// buildPromptMessages 會先放一個暫時 id，sendTracked 會再統一改寫成正式的 prompt id
-	const messages = buildPromptMessages({ promptId: "pending", body, question, options }) as Record<string, unknown>[];
-	return sendTracked(env, conversation, {
-		messages,
-		templateKey: typeof input.templateKey === "string" ? input.templateKey : null,
-		variables,
-		...guardOf(request, input),
-	});
-}
-
 /**
  * 直接送 LINE 訊息陣列（Flex、template、quick reply…）。
  * 任何 postback 按鈕都會自動掛上追蹤 id，使用者點選後寫回 prompts。
@@ -606,7 +547,6 @@ async function handleSendMessages(request: Request, env: Env, conversation: Conv
 	return sendTracked(env, conversation, {
 		messages: validated.messages,
 		templateKey: typeof input.templateKey === "string" ? input.templateKey : null,
-		variables: null,
 		allowChange: input.allowChange === true,
 		...guardOf(request, input),
 	});
@@ -621,7 +561,6 @@ async function sendTracked(
 	input: {
 		messages: Record<string, unknown>[];
 		templateKey: string | null;
-		variables: Record<string, string> | null;
 		allowChange?: boolean;
 	} & Pick<OutboundInput, "agentName" | "clientKey" | "lastSeenMessageId" | "force">,
 ): Promise<Response> {
@@ -656,7 +595,6 @@ async function sendTracked(
 			body,
 			question,
 			options,
-			variables: input.variables,
 			payload: messages,
 			allowChange: input.allowChange ?? false,
 			createdAt: result.message.createdAt,

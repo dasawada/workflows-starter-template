@@ -464,11 +464,4 @@ describe("conversation integrity", () => {
 		expect(res.status).toBe(200);
 		expect(((await res.json()) as { conversation: Conversation }).conversation.unreadCount).toBe(0);
 	});
-
-	it("exposes the bot chat mode so the read mode can be verified", async () => {
-		mockLine("GET", "/v2/bot/info", lineJson({ userId: "Ubot", basicId: "@shop", displayName: "商店", chatMode: "chat", markAsReadMode: "manual" }));
-		const res = await SELF.fetch("https://console.test/api/line/info", { headers: AUTH });
-		expect(res.status).toBe(200);
-		expect(await res.json()).toMatchObject({ basicId: "@shop", chatMode: "chat", markAsReadMode: "manual" });
-	});
 });
