@@ -31,8 +31,8 @@
 	},
 	/**
 	 * 非機密設定值。機密（LINE 金鑰、客服台登入 token）請勿寫在這裡：
-	 * - 本機：寫在 .dev.vars（見 .dev.vars.example）
-	 * - 正式：wrangler secret put <NAME>
+	 * - 正式：Cloudflare dashboard → 該 Worker → Settings → Variables and Secrets
+	 * - 本機（選用）：寫在 .dev.vars（見 .dev.vars.example）
 	 */
 	"vars": {
 		// 客服多久沒回覆就標記「待處理」並推播提醒（分鐘）
@@ -91,8 +91,7 @@
 		}
 	],
 	/**
-	 * R2：LINE 傳來的圖片／影片／檔案
-	 * 正式環境請先執行 `wrangler r2 bucket create cs-console-media`
+	 * R2：LINE 傳來的圖片／影片／檔案；bucket 由 scripts/bootstrap.sh 建立
 	 */
 	"r2_buckets": [
 		{

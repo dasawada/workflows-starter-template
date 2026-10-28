@@ -18,7 +18,7 @@ import { recordMetric } from "./metrics";
 
 /**
  * 對話完整性：缺口紀錄、同步健康狀態、排程維護。
- * 原則：沒有證據證明完整，就不宣稱完整。每個已知的缺口都要留下紀錄，讓客服看得到。
+ * 原則：沒有證據證明完整，就不宣稱完整。每個已知的缺口都要留下紀錄，由工程端以 npm run reports 判讀（客服台不顯示）。
  */
 
 export const STATE_KEYS = {
@@ -133,7 +133,7 @@ export async function refreshBotInfo(env: Env): Promise<LineBotInfo | null> {
 }
 
 /**
- * 排程維護（cron 每 5 分鐘，也可從完整性頁手動觸發）：
+ * 排程維護（cron 每 5 分鐘，也可用 POST /api/integrity/maintenance 手動觸發）：
  * 1. 送出中超過 1 分鐘未確認的客服訊息：用同一把 retry key 重推，LINE 回 409 代表早已送達；超過 24 小時標 unknown 並記缺口
  * 2. 附件還沒抓到或抓失敗：重抓，404/410 標過期並記缺口
  * 3. 重新抓 bot info

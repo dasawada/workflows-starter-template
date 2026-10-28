@@ -2,9 +2,15 @@
 
 ## 專案定位
 
-LINE 官方帳號客服訊息收發台，從頭開始的新專案（原本的 Cloudflare Workflows 範本程式碼已全部移除，只保留工具鏈）。
-技術棧：Cloudflare Workers + D1 + R2 + Durable Objects + Workflows，前端 React + Vite + Tailwind。
+LINE 官方帳號客服訊息收發台（原本的 Cloudflare Workflows 範本程式碼已全部移除，只保留工具鏈與 Worker 名稱）。
+技術棧：Cloudflare Workers + D1 + R2 + Durable Objects + Workflows + Queues + Analytics Engine，前端 React 19 + Vite + Tailwind 4。
 Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
+
+文件分工：
+- `docs/architecture.md`：架構、技術選型的理由、模組分層、資料流、設計原則。動到分層、資料流或新增 Cloudflare 資源時同步更新。
+- `docs/acceptance.md`：介面驗收清單（見下方「介面設計原則」）。
+- `README.md`：功能、部署、密鑰、API、指令、監控。新增路由或指標時同步更新。
+- 本檔：改程式時必須遵守的規則與已知陷阱。
 
 ## 驗證方式（重要）
 
@@ -12,8 +18,8 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 - Claude 的職責是改好程式、通過 `npm run check` 與 `npm test`、commit 並 push 到 `main`；部署與密鑰設定在 Cloudflare dashboard 完成，Claude 不需要也不應登入 Cloudflare。
 - `wrangler.jsonc` 的 `database_id` 是 D1 資源識別碼（非密鑰），已寫入正式值；若換帳號或重建資料庫，bootstrap 會自動覆寫（含 dist 內已產生的 wrangler.json）。
 - **一切功能都在正式環境部署後直接驗證**，不以本機開發伺服器為驗證依據。
-- 改完程式碼的標準流程：`npm run check`（tsc + dry-run）→ `npm test` → `npm run deploy` → 用真實 LINE 帳號與客服台操作確認。
-- 需要查正式環境狀況時用 `npx wrangler tail`、`npx wrangler d1 execute DB --remote --command "..."`。
+- 改完程式碼的標準流程：`npm run check`（`tsc -b` + dry-run）→ `npm test` → commit 並 push 到 `main`（Workers Builds 自動部署）→ 由使用者以真實 LINE 帳號與客服台操作確認。
+- 查正式環境狀況的指令（需使用者本機已 `wrangler login`，由使用者執行或明確授權後執行）：`npx wrangler tail`、`npx wrangler d1 execute DB --remote --command "..."`、`npm run reports`。
 - 不要為了驗證而建立假資料的本機流程；本機 `npm run dev` 只用來看 UI 排版。
 
 ## 密鑰與設定
@@ -23,7 +29,7 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 - `wrangler.jsonc` 的 `name` 必須與 dashboard 的 Worker 專案名稱一致（目前 `workflows-starter-template`），否則 Workers Builds 部署會失敗。
   Claude 不執行 `wrangler secret put`、不建立 `.dev.vars`、不把任何密鑰或環境資訊寫進 `wrangler.jsonc` 或其他設定檔。
   `.dev.vars.example` 只是空白範本。
-- 非機密設定放 `wrangler.jsonc` 的 `vars`（`REPLY_SLA_MINUTES`、`WELCOME_MESSAGE`）。
+- 非機密設定放 `wrangler.jsonc` 的 `vars`（`REPLY_SLA_MINUTES`、`WELCOME_MESSAGE`、`WEBHOOK_MODE`）。
 - 改過 `wrangler.jsonc` 的 binding 後要跑 `npm run cf-typegen` 重新產生 `worker-configuration.d.ts`。
 - Secrets 的型別在 `worker/env.d.ts` 手動維護（擴充 `__BaseEnv_Env`）。
 
@@ -31,7 +37,8 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 
 | 路徑 | 職責 |
 | --- | --- |
-| `worker/index.ts` | 路由；只做參數檢查與呼叫下層，不寫 SQL、不直接呼叫 LINE API |
+| `worker/index.ts` | 路由與請求編排（`handleReply`、`sendTracked`）、`fetch` / `queue` / `scheduled` 三個進入點；只做參數檢查與呼叫下層，不寫 SQL；LINE 呼叫經 `lineClientFor` 或 `outbox` |
+| `worker/auth.ts` | `CONSOLE_TOKEN` 驗證（Bearer 或 WebSocket 的 `?token=`，常數時間比較） |
 | `worker/webhook-line.ts` | LINE webhook 事件處理 |
 | `worker/line.ts` | LINE API client、簽章驗證、事件型別 |
 | `worker/db.ts` | 所有 SQL 集中於此 |
@@ -50,9 +57,11 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 | `src/components/LinePreview.tsx` | 近似重現 LINE 呈現的預覽（template / flex / quick reply） |
 | `migrations/` | D1 schema，新增欄位一律新開 migration 檔，不改舊檔 |
 | `shared/types.ts` | 前後端共用型別，API 回傳格式改動要先改這裡 |
-| `src/` | React 客服台；`src/api.ts` 是唯一打 API 的地方 |
+| `src/` | React 客服台；`src/api.ts` 是唯一打 API 的地方；`src/agent.ts` 存客服名稱（localStorage，以 `X-Agent-Name` 帶上） |
+| `src/hooks/` | `useInboxSocket`（WebSocket、25 秒心跳、重連）、`useEscape`（浮層的 Escape 關閉） |
 | `src/route.ts` | 畫面狀態（選取的對話、面板、互動訊息對話框）與網址的對應；App 以 `navigate()` 改網址、監聽 `popstate`，瀏覽器上一頁才有作用。新增頁面或對話框時要加進這裡，不要另外開 useState |
 | `test/` | Vitest 跑在 workerd 內；LINE API 用 `vi.stubGlobal("fetch")` 攔截（此版本沒有 `fetchMock`） |
+| `scripts/` | `bootstrap.sh`（部署前置，必須冪等）、`reports.mjs`（工程端讀取／結案缺口）、`loadtest.mjs`（webhook 壓測） |
 
 ## 慣例
 
@@ -60,7 +69,7 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 - 縮排用 tab。回覆與註解用繁體中文，識別字用英文。
 - 使用者看得到的文案（前端、後端回傳的錯誤與系統訊息、完整性事件標題）一律正式書面語：不用口語（拿、塞、搞、看看、～）、不用表情符號、量詞用「個」「張卡片」「則」、對使用者稱「您」、提示句以句號結尾。
 - 新增渠道（如 Teams）時：新增 `worker/<channel>.ts` 與 `worker/webhook-<channel>.ts`，資料寫入仍走 `db.ts`，`channel` 欄位填對應值，`handleReply` 依 `channel` 分派。
-- 部署流程改動（新 binding、新資源）要同步更新 README 的「正式部署」段落。
+- 部署流程改動（新 binding、新資源）要同步更新 README 的「正式部署」段落與 `docs/architecture.md` 的技術選型表。
 
 ## 介面設計原則（Apple Human Interface Guidelines 的精神，每個 session 都要遵守）
 
@@ -91,20 +100,24 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 
 ## 已知事項
 
-- LINE 按鈕可反覆按：`recordPromptResponse` 每次都寫 `prompt_responses`，但只有第一次（或 `allow_change = 1`）會更新 `prompts` 的結果；重複按會回覆「以第一次回覆為準」。
+### 部署與工具鏈的陷阱
 
 - `wrangler.jsonc` 的 `migrations`（Durable Object）只能追加新 tag，絕不能改寫或刪除已部署過的 tag，否則 Cloudflare 會略過它並在部署時報 10064。正式環境目前已套用到 `v2`。
 - Analytics Engine 需在 dashboard 啟用一次；未啟用時 bootstrap 會改以不帶 `METRICS` binding 的設定重試部署，`metrics.ts` 以 `env.METRICS?.` 容忍缺少 binding。
 - Queues 只在 Workers Paid 提供。`scripts/bootstrap.sh` 建不出 queue 時會改寫 dist 內的部署設定（移除 `queues`、`WEBHOOK_MODE=inline`），程式端以 `env.LINE_EVENTS` 是否存在再保險一次。`wrangler.jsonc` 本身保持 queue 設定。
 - 正式環境的 Worker `workflows-starter-template` 曾部署過原始範本，舊的 Workflow `my-workflow` 可能殘留在 dashboard，不影響運作，可手動刪除。
 - `test/reminder.test.ts` 會印一行 `WorkflowTimeoutError` 的 uncaught exception，來自測試工具 `forceEventTimeout` 內部，測試本身通過，可忽略。
+
+### 領域規則（改相關程式前先讀）
+
 - 客服台目前為單一共用 `CONSOLE_TOKEN`，無個別帳號。客服名稱由前端以 `X-Agent-Name`（URI 編碼）自報，只用於接手／在看／衝突偵測／署名，不是身分驗證。
 - 客服發訊一律走 `worker/outbox.ts`，不要在別處直接呼叫 `client.push`。`delivery_status`：pending（排程會重推，LINE 回 409 視為已送達）／sent／failed（4xx，客服可重試）／unknown（超過 24 小時，記 `send_unknown` 缺口）。
 - 缺口紀錄 `integrity_events` 用 `dedupe_key` 合併（`ON CONFLICT(dedupe_key) WHERE dedupe_key IS NOT NULL`），重送以小時為桶。DLQ consumer 把放棄的事件連原始 payload 記成 `event_dead_lettered`。
 - 客服回報只有一種入口：泡泡旁的驚嘆號 → `POST /api/messages/:id/report`，伺服器自動收齊該訊息、前後各 5 則、送達／附件狀態、相關缺口進 `details.context`，同一則重複按只累加 count。客服台沒有完整性頁面、橫幅或數字卡；判讀與修正是工程端的事，不要再把內部狀態（queue 模式、markAsReadMode、cron）做成給客服看的介面。
 - CSV 匯入的訊息 `source = manager_csv`、`external_id = csv:<hash>`，不動未讀與逾時；與 webhook 已收到的訊息以「同一分鐘 + 同文字」視為重複。官方 CSV 的實際欄位名稱尚未以真實檔案驗證，欄位偵測靠關鍵字，偵測不到時前端要求指定。
 - PNP 的 `to` 是 E.164（含 `+`）的 SHA-256 hex，端點 `POST https://api.line.me/bot/pnp/push`；是否含 `+` 與實際回應格式尚未在正式環境驗證。
-- 一般回覆只能純文字，圖片／Flex Message 發送尚未做。
+- 一般回覆（`/reply`）只能純文字（可帶引用）；Flex 等互動訊息走 `/send`；客服上傳圖片尚未做。
+- LINE 按鈕可反覆按：`recordPromptResponse` 每次都寫 `prompt_responses`，但只有第一次（或 `allow_change = 1`）會更新 `prompts` 的結果；重複按會回覆「以第一次回覆為準」。
 - 對話完整性（migration 0005）：`quotedMessageId` 在收訊時以 `findMessageByExternalId` 做快照存進 `metadata.quote`，找不到原文時 `messageId: null`，前端明示「無法取得」；`unsend` 清掉 text／media／R2 物件並設 `unsent_at`；`messageEdited`（目前僅群組文字訊息）以同一個 LINE message id 更新 text、第一版留在 `metadata.originalText`，只接受 timestamp 較新的版本；`imageSet`、`senderUserId`、`isRedelivery` 原樣存 metadata。
 - 已讀：使用者訊息的 `markAsReadToken` 存在 `conversations.mark_as_read_token`，客服 `POST /read` 時呼叫 `POST /v2/bot/chat/markAsRead`，成功才清掉 token。只有官方帳號 Chat 開啟（`GET /api/line/info` 的 `markAsReadMode = manual`）才有效，Chat 關閉時 LINE 回 400、客服台照常。`messageEdited` 的事件結構與 `markAsReadToken` 的位置是依文件寫的，正式環境第一次收到時用 `npx wrangler tail` 核對。
 - 互動訊息編輯台只產生五種受控版型（text / confirm / buttons / carousel / 固定版面的 Flex 資訊卡），不開放自由 Flex；新版型要先在 `types.ts` 加草稿型別、`toLine.ts` 加轉換與檢查、`MessageForm.tsx` 加表單，並在 `test/builder.test.ts` 加測試。

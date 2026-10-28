@@ -1,5 +1,5 @@
 # 複製成 .dev.vars（已在 .gitignore 內，不會被 commit）
-# 正式環境請改用：wrangler secret put <NAME>
+# 正式環境請在 Cloudflare dashboard → 該 Worker → Settings → Variables and Secrets 輸入
 
 # LINE Developers Console → 你的 Messaging API channel → Basic settings → Channel secret
 LINE_CHANNEL_SECRET=
