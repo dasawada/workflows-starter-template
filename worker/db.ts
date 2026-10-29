@@ -192,11 +192,12 @@ export async function listConversations(
 export async function getStats(db: D1Database): Promise<Stats> {
 	const row = await db
 		.prepare(
+			// 只讀 open 的列（走 idx_conversations_status_last），已結案的對話再多也不計入讀取量
 			`SELECT
-				COALESCE(SUM(CASE WHEN status = 'open' THEN unread_count ELSE 0 END), 0) AS unread_total,
-				SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open_count,
-				SUM(CASE WHEN status = 'open' AND needs_attention = 1 THEN 1 ELSE 0 END) AS needs_attention_count
-			 FROM conversations`,
+				COALESCE(SUM(unread_count), 0) AS unread_total,
+				COUNT(*) AS open_count,
+				COALESCE(SUM(needs_attention), 0) AS needs_attention_count
+			 FROM conversations WHERE status = 'open'`,
 		)
 		.first<{ unread_total: number; open_count: number; needs_attention_count: number }>();
 	return {
@@ -891,11 +892,16 @@ export async function setDeliveryStatus(
 	return row ? toMessage(row) : null;
 }
 
-/** 排程用：發送中超過一段時間還沒確認的訊息 */
+/**
+ * 排程用：發送中超過一段時間還沒確認的訊息。
+ * `IN ('pending', 'failed')` 與 partial index 的條件一字不差，SQLite 才會用 idx_messages_delivery_pending；
+ * 只寫 `= 'pending'` 會掃整張 messages 表，每 5 分鐘一次，讀取量隨訊息總數成長。
+ */
 export async function listPendingOutbound(db: D1Database, olderThan: number, limit = 50): Promise<Message[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT * FROM messages WHERE delivery_status = 'pending' AND created_at < ?
+			`SELECT * FROM messages
+			 WHERE delivery_status IN ('pending', 'failed') AND delivery_status = 'pending' AND created_at < ?
 			 ORDER BY created_at LIMIT ?`,
 		)
 		.bind(olderThan, limit)
