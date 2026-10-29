@@ -130,7 +130,7 @@ describe("LINE webhook", () => {
 	});
 
 	it("ignores LINE redelivery of the same message id", async () => {
-		mockLine("GET", "/v2/bot/profile/U-bob", lineJson({ displayName: "Bob" }), 2);
+		mockLine("GET", "/v2/bot/profile/U-bob", lineJson({ displayName: "Bob" }));
 
 		await postWebhook([textEvent("U-bob", "first", "m-dup")]);
 		await postWebhook([textEvent("U-bob", "first", "m-dup")]);
@@ -166,6 +166,20 @@ describe("LINE webhook", () => {
 			["system", "使用者加入好友"],
 			["system", "歡迎加入。"],
 		]);
+	});
+
+	it("fetches the profile only for a new conversation, and refreshes it on re-follow", async () => {
+		// afterEach 會確認：兩則訊息只取一次個人資料
+		mockLine("GET", "/v2/bot/profile/U-rename", lineJson({ displayName: "舊名" }));
+		await postWebhook([textEvent("U-rename", "第一則", "m-rename-1")]);
+		await postWebhook([textEvent("U-rename", "第二則", "m-rename-2")]);
+
+		mockLine("GET", "/v2/bot/profile/U-rename", lineJson({ displayName: "新名" }));
+		await postWebhook([{ type: "follow", timestamp: Date.now(), source: { type: "user", userId: "U-rename" } }]);
+
+		const list = await SELF.fetch("https://console.test/api/conversations?status=all&q=U-rename", { headers: AUTH });
+		const { conversations } = (await list.json()) as { conversations: Conversation[] };
+		expect(conversations[0]?.displayName).toBe("新名");
 	});
 });
 
@@ -307,7 +321,7 @@ describe("conversation integrity", () => {
 	}
 
 	it("snapshots the quoted message when it exists locally, and flags it when it does not", async () => {
-		mockLine("GET", "/v2/bot/profile/U-quote", lineJson({ displayName: "Quoter" }), 3);
+		mockLine("GET", "/v2/bot/profile/U-quote", lineJson({ displayName: "Quoter" }));
 		await postWebhook([textEvent("U-quote", "請問要寄到台北還是新竹？", "m-q-original")]);
 		await postWebhook([
 			{
@@ -338,7 +352,7 @@ describe("conversation integrity", () => {
 	});
 
 	it("clears content on unsend, deletes the media object and updates the preview", async () => {
-		mockLine("GET", "/v2/bot/profile/U-unsend", lineJson({ displayName: "Undo" }), 2);
+		mockLine("GET", "/v2/bot/profile/U-unsend", lineJson({ displayName: "Undo" }));
 		mockLine("GET", "/v2/bot/message/m-unsend-img/content", () =>
 			new Response("png-bytes", { headers: { "content-type": "image/png" } }),
 		);
@@ -435,7 +449,7 @@ describe("conversation integrity", () => {
 	});
 
 	it("marks the chat as read on LINE when an agent opens the conversation", async () => {
-		mockLine("GET", "/v2/bot/profile/U-read", lineJson({ displayName: "Reader" }), 2);
+		mockLine("GET", "/v2/bot/profile/U-read", lineJson({ displayName: "Reader" }));
 		await postWebhook([
 			{ ...textEvent("U-read", "有人在嗎", "m-read-1"), markAsReadToken: "mart-1" },
 			{ ...textEvent("U-read", "在嗎？", "m-read-2"), markAsReadToken: "mart-2" },

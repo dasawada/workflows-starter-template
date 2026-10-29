@@ -188,7 +188,7 @@ describe("quoting console-sent messages", () => {
 			body: JSON.stringify({ messages: [{ type: "text", text: "另外" }, { type: "text", text: "運費 60 元" }] }),
 		});
 
-		mockLine("GET", "/v2/bot/profile/U-quote-agent", lineJson({ displayName: "Quoter" }), 2);
+		// 對話已有名稱，後續來訊不再向 LINE 取個人資料
 		await postWebhook([
 			{ ...textEvent("U-quote-agent", "新竹", "m-qa-1"), message: { id: "m-qa-1", type: "text", text: "新竹", quotedMessageId: "L-a1" } },
 			{ ...textEvent("U-quote-agent", "運費可以免嗎", "m-qa-2"), message: { id: "m-qa-2", type: "text", text: "運費可以免嗎", quotedMessageId: "L-b2" } },

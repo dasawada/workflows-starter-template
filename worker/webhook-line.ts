@@ -12,11 +12,10 @@ import {
 import {
 	editMessageText,
 	findMessageByExternalId,
+	getConversation,
 	getPrompt,
-	getReminderInstanceId,
 	insertMessage,
 	recordPromptResponse,
-	setReminderInstanceId,
 	setSystemState,
 	unsendMessage,
 	updateMessageMetadata,
@@ -27,6 +26,7 @@ import { lineClientFor } from "./line-env";
 import { storeMedia } from "./media";
 import { recordIntegrity, STATE_KEYS } from "./integrity";
 import { handleDeliveryEvent } from "./pnp";
+import { armReminder } from "./reminder";
 
 export { lineClientFor };
 import { inboxStub } from "./inbox-do";
@@ -223,14 +223,23 @@ async function handleEvent(
 
 type Target = NonNullable<ReturnType<typeof conversationTarget>>;
 
-/** 建立或補齊對話資料（名稱、頭像） */
+/**
+ * 確保對話存在。已有名稱就直接回傳，不呼叫 LINE、不寫 D1，每則訊息只多讀 1 列。
+ * 新對話、名稱還是空的，或 refresh（加入好友、入群，很少發生，順便更新名稱與頭像）才向 LINE 取資料。
+ */
 async function ensureConversation(
 	target: Target,
 	source: LineWebhookEvent["source"],
 	env: Env,
 	client: LineClient,
 	now: number,
+	refresh = false,
 ) {
+	if (!refresh) {
+		const existing = await getConversation(env.DB, target.conversationId);
+		if (existing?.displayName) return existing;
+	}
+
 	let displayName: string | null = null;
 	let pictureUrl: string | null = null;
 
@@ -398,7 +407,7 @@ async function handleMessage(
 		});
 	}
 
-	await startReminderIfNeeded(target.conversationId, env);
+	await armReminder(env, target.conversationId, inserted.reminderInstanceId);
 }
 
 /**
@@ -566,35 +575,6 @@ function formatTime(ts: number): string {
 	}).format(new Date(ts));
 }
 
-/**
- * 每個對話同時只有一個提醒流程；客服回覆時由 /api 端送 agent-replied 事件結束它。
- */
-async function startReminderIfNeeded(
-	conversationId: string,
-	env: Env,
-): Promise<void> {
-	const existing = await getReminderInstanceId(env.DB, conversationId);
-	if (existing) {
-		try {
-			const instance = await env.REPLY_REMINDER.get(existing);
-			const status = await instance.status();
-			if (status.status === "running" || status.status === "waiting" || status.status === "queued") {
-				return;
-			}
-		} catch {
-			// 找不到舊 instance 就重新建立
-		}
-	}
-	try {
-		const instance = await env.REPLY_REMINDER.create({
-			params: { conversationId },
-		});
-		await setReminderInstanceId(env.DB, conversationId, instance.id);
-	} catch (err) {
-		console.error("start reminder failed", err);
-	}
-}
-
 async function handleFollow(
 	event: LineWebhookEvent,
 	target: Target,
@@ -602,7 +582,7 @@ async function handleFollow(
 	client: LineClient,
 ): Promise<void> {
 	const now = event.timestamp || Date.now();
-	await ensureConversation(target, event.source, env, client, now);
+	await ensureConversation(target, event.source, env, client, now, true);
 	await recordSystemMessage(
 		target.conversationId,
 		event.type === "follow" ? "使用者加入好友" : "官方帳號已加入群組",

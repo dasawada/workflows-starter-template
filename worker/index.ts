@@ -13,7 +13,7 @@ import {
 	summarizeMessages,
 	validateLineMessages,
 } from "./line";
-import { AGENT_REPLIED_EVENT } from "./workflow";
+import { finishReminder } from "./reminder";
 import {
 	assignConversation,
 	clearMarkAsReadToken,
@@ -23,7 +23,6 @@ import {
 	getMessage,
 	getMessageRetryKey,
 	getStats,
-	getReminderInstanceId,
 	insertMessage,
 	listConversations,
 	listImportBatches,
@@ -37,7 +36,6 @@ import {
 	markConversationRead,
 	resolveIntegrityEvent,
 	setConversationStatus,
-	setReminderInstanceId,
 } from "./db";
 import { getHealth, recordIntegrity, runMaintenance } from "./integrity";
 import { pushOutboundMessage, sendOutbound, type OutboundInput } from "./outbox";
@@ -521,19 +519,6 @@ async function handleReply(request: Request, env: Env, conversation: Conversatio
 	});
 	if (result.kind === "sent" || result.kind === "pending") await finishReminder(env, conversation.id);
 	return outboundResponse(result);
-}
-
-/** 客服已回覆：結束逾時提醒流程 */
-async function finishReminder(env: Env, conversationId: string): Promise<void> {
-	const reminderId = await getReminderInstanceId(env.DB, conversationId);
-	if (!reminderId) return;
-	try {
-		const instance = await env.REPLY_REMINDER.get(reminderId);
-		await instance.sendEvent({ type: AGENT_REPLIED_EVENT, payload: {} });
-	} catch {
-		// instance 可能已結束
-	}
-	await setReminderInstanceId(env.DB, conversationId, null);
 }
 
 /**

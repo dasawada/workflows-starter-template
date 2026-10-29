@@ -302,11 +302,12 @@ export function previewText(type: MessageType, text: string | null): string {
  * 使用者傳入的訊息會把對話重新打開並累加未讀；客服發送的訊息會清除「待處理」標記。
  * 對話摘要的 UPDATE 以「這則訊息真的存在」為條件，所以 LINE 重送（INSERT 被 IGNORE）不會重複累加未讀。
  * 回傳 null 代表這則訊息（依 external_id）已經存在，屬於 LINE 重送。
+ * reminderInstanceId 是回讀對話列時順帶取得的，給 armReminder 用，省一次查詢；不出現在 API 回應裡。
  */
 export async function insertMessage(
 	db: D1Database,
 	input: NewMessageInput,
-): Promise<{ message: Message; conversation: Conversation } | null> {
+): Promise<{ message: Message; conversation: Conversation; reminderInstanceId: string | null } | null> {
 	const preview = previewText(input.type, input.text ?? null);
 	const isInbound = input.direction === "inbound";
 
@@ -388,7 +389,11 @@ export async function insertMessage(
 	if (!row || !convRow) {
 		throw new Error("message/conversation missing after insert");
 	}
-	return { message: toMessage(row), conversation: toConversation(convRow) };
+	return {
+		message: toMessage(row),
+		conversation: toConversation(convRow),
+		reminderInstanceId: convRow.reminder_instance_id,
+	};
 }
 
 export async function updateMessageMedia(

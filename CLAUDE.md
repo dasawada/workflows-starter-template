@@ -45,6 +45,7 @@ Teams 渠道尚未實作，`conversations.channel` 與渠道層已預留。
 | `worker/db.ts` | 所有 SQL 集中於此 |
 | `worker/inbox-do.ts` | 單一實例 `InboxDO`（名稱固定 `"inbox"`），WebSocket 廣播 |
 | `worker/workflow.ts` | `ReplyReminderWorkflow` 逾時提醒 |
+| `worker/reminder.ts` | 提醒的唯一入口：`armReminder`（使用者來訊）、`finishReminder`（客服回覆）；「每個對話最多一個實例」只寫在這裡 |
 | `worker/metrics.ts` | Analytics Engine 指標 `recordMetric`，寫入失敗一律吞掉 |
 | `worker/outbox.ts` | 客服發訊唯一入口 `sendOutbound`：先寫 D1（pending）再帶 `X-Line-Retry-Key` 推送；`detectConflict` 做接手／後到回覆的 409 |
 | `worker/integrity.ts` | 缺口紀錄 `recordIntegrity`（dedupeKey 合併計數）、健康狀態、`runMaintenance`（cron 每 5 分鐘與 `POST /api/integrity/maintenance`）。**客服台不顯示這些**；工程端用 `npm run reports`（`scripts/reports.mjs`，直接讀正式 D1）每天讀取與結案；只有 token 時用 `/api/integrity/health`（健檢）、`/events`、`/resolve`、`/maintenance`（修復） |

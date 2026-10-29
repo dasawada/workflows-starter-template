@@ -54,6 +54,7 @@ worker/index.ts            路由：參數檢查、呼叫下層、組 HTTP 回�
    ├─ webhook-line.ts      LINE 事件 → 領域操作（渠道層，入站）
    ├─ outbox.ts            客服發訊唯一入口（出站）
    ├─ integrity.ts         缺口紀錄、健康狀態、排程維護
+   ├─ reminder.ts          逾時提醒的建立與結束（每個對話最多一個 Workflow）
    ├─ media.ts / import-csv.ts / pnp.ts   各自一件事
    ├─ workflow.ts / inbox-do.ts           Cloudflare 執行期類別
    │
@@ -84,10 +85,11 @@ src/components/            呈現層
 
 1. `POST /webhook/line` 驗 `X-Line-Signature`，失敗一律 401。
 2. queue 模式丟進 Queues 立即回 200；inline 模式同步處理，單一事件失敗不影響其他事件。
-3. 事件處理以 `external_id`（LINE message id，唯一索引）與 `webhookEventId` 去重；LINE 的重送（`isRedelivery`）記一筆以小時為桶的缺口。
-4. 訊息、對話更新、回讀在同一個 `batch` 完成；重送不會重複累加未讀。
-5. 附件交給 `waitUntil` 下載到 R2；使用者訊息啟動逾時提醒（同對話已有執行中的實例就不再建立）。
-6. `InboxDO.broadcast` 推 `message.new` 給所有在線客服。
+3. 對話已有名稱就不呼叫 LINE 取個人資料，也不寫 D1；只有新對話、名稱為空，或加入好友、入群時才取（順便更新改過的名稱與頭像）。
+4. 事件處理以 `external_id`（LINE message id，唯一索引）與 `webhookEventId` 去重；LINE 的重送（`isRedelivery`）記一筆以小時為桶的缺口。
+5. 訊息、對話更新、回讀在同一個 `batch` 完成；重送不會重複累加未讀。
+6. 附件交給 `waitUntil` 下載到 R2；使用者訊息以 `armReminder` 啟動逾時提醒（同對話已有執行中的實例就不再建立；實例 id 取自上一步回讀的對話列，不另外查詢）。
+7. `InboxDO.broadcast` 推 `message.new` 給所有在線客服。
 
 ### 發訊（outbox）
 
